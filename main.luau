@@ -730,7 +730,7 @@ local function saveinstance(target, options)
 	local REBUILD_SOURCE = [==[
 -- kSSI terrain backup. Rebuild it from the command bar:
 --     require(game.ReplicatedStorage.kSSI_Terrain)()
-local DATA = [=[%s]=]
+local DATA = [=[__KSSI_DATA__]=]
 
 local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 local function decode(s)
@@ -785,7 +785,7 @@ return function()
 		terrain:WriteVoxels(region, 4, mats, occs)
 		if c % 32 == 0 then task.wait() end
 	end
-	print(("[kSSI] terrain rebuilt: %%d chunks"):format(count))
+	print(("[kSSI] terrain rebuilt: %d chunks"):format(count))
 end
 ]==]
 
@@ -855,7 +855,9 @@ end
 		and (OPTIONS.TerrainBackup == "always" or not readTerrainBlob(workspace.Terrain, "SmoothGrid")) then
 		local okT, blob, chunkCount, cells = pcall(captureVoxels, workspace.Terrain)
 		if okT and chunkCount > 0 then
-			local source = REBUILD_SOURCE:format(base64(blob))
+			-- plain splice (no :format, the rebuild code has % signs of its own)
+			local at = REBUILD_SOURCE:find("__KSSI_DATA__", 1, true)
+			local source = REBUILD_SOURCE:sub(1, at - 1) .. base64(blob) .. REBUILD_SOURCE:sub(at + #"__KSSI_DATA__")
 			extraChildren.ReplicatedStorage = extraChildren.ReplicatedStorage or {}
 			table.insert(extraChildren.ReplicatedStorage, ('<Item class="ModuleScript" referent="RBX%s"><Properties>%s%s</Properties></Item>'):format(
 				HttpService:GenerateGUID(false):gsub("-", ""), T("string", "Name", "kSSI_Terrain"), T("ProtectedString", "Source", cdata(source))))
