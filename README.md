@@ -3,7 +3,7 @@
 A full **saveinstance** written in plain Luau, using only standard executor globals.
 Save a whole game as a `.rbxlx`, or any instance as a `.rbxmx`, and it opens cleanly in Roblox Studio.
 
-Made for and tested on **[kAPI](#about-kapi)**. It only needs common executor functions, so it works on other executors too.
+Made for and tested on **[kAPI](https://github.com/kumori-kuno/kAPI)**. It only needs common executor functions, so it works on other executors too.
 
 ---
 
