@@ -322,7 +322,7 @@ local function saveinstance(target, options)
 					src = out
 					decompiled += 1
 				else
-					local why = ok and ("returned " .. typeof(out)) or tostring(out):sub(1, 120)
+					local why = ok and (type(out) == "string" and "returned an empty string" or ("returned " .. typeof(out))) or tostring(out):sub(1, 120)
 					decompileFails[why] = (decompileFails[why] or 0) + 1
 				end
 			end
