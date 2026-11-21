@@ -1,4 +1,4 @@
-# kSSI — kAPI Save Instance
+# kUSI — kAPI Universal Save Instance
 
 A full **saveinstance** written in plain Luau, using only standard executor globals.
 Save a whole game as a `.rbxlx`, or any instance as a `.rbxmx`, and it opens cleanly in Roblox Studio.
@@ -46,34 +46,6 @@ After it loads once, it's also available as the global `saveinstance_kssi`.
 
 ## Options
 
-```lua
-local config = {
-	["Debug"] = false,
-	["mode"] = "optimized", -- "optimized" | "full" | "scripts"
-	["noscripts"] = false,
-	["Decompile"] = true,
-	["DecompileIgnore"] = {},
-	["NilInstances"] = true,
-	["IgnoreList"] = {},
-	["IgnoreProperties"] = {},
-	["IgnoreNotArchivable"] = false,
-	["RemovePlayerCharacters"] = false,
-	["SavePlayers"] = true,
-	["IsolateLocalPlayer"] = false,
-	["ExtraInstances"] = {},
-	["FilePath"] = nil,
-	["SaveBytecode"] = false,
-	["ShowStatus"] = true,
-	["Callback"] = nil,
-	["ReadMe"] = true,
-	["YieldEvery"] = 400,
-	["SaveTerrain"] = true,
-	["TerrainBackup"] = "auto", -- "auto" | "always" | "never"
-	["TerrainMinY"] = -512,
-	["TerrainMaxY"] = 512,
-}
-```
-
 | Option | Default | What it does |
 |---|---|---|
 | `mode` | `"optimized"` | `"optimized"` saves the usual services. `"full"` saves everything under `game`. `"scripts"` keeps the tree but only writes scripts (and names). |
@@ -117,11 +89,17 @@ local config = {
 
 Every global is looked up once, under any of its common names, with a fallback when it's missing:
 
-| Needed | Optional (better results) |
-|---|---|
-| `writefile` | `decompile`, `gethiddenproperty`, `isscriptable`, `getnilinstances`, `getscriptbytecode`, `crypt.base64encode`, `gethui`, `protectgui`, `request` |
+Nothing is strictly required. These make it better when they exist:
 
-Without `crypt.base64encode`, a built-in Luau base64 is used. If `writefile` is missing, kSSI stops with a clear error.
+`writefile`, `decompile`, `gethiddenproperty`, `isscriptable`, `getnilinstances`, `getscriptbytecode`, `crypt.base64encode`, `gethui`, `protectgui`, `setclipboard`, `request`
+
+**No executor? No problem.** Without `writefile` (a plain script, a script builder...), `saveinstance` returns the file text instead of saving it (and copies it if `setclipboard` exists). Paste it into a file named `place.rbxlx` / `model.rbxmx` and open it in Studio:
+
+```lua
+local xml = saveinstance(workspace.MyModel)
+```
+
+Without `crypt.base64encode`, a built-in Luau base64 is used.
 
 ---
 
