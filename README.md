@@ -69,7 +69,6 @@ local config = {
 	["YieldEvery"] = 400,
 	["SaveTerrain"] = true,
 	["TerrainBackup"] = "auto", -- "auto" | "always" | "never"
-	["TerrainRange"] = 1024,
 	["TerrainMinY"] = -512,
 	["TerrainMaxY"] = 512,
 }
@@ -98,8 +97,7 @@ local config = {
 | `YieldEvery` | `400` | Instances per frame (lower = smoother, slower). |
 | `SaveTerrain` | `true` | Save Terrain. |
 | `TerrainBackup` | `"auto"` | `"auto"` adds a rebuild module only when the real terrain data can't be read, `"always"` always adds it, `"never"` never does. |
-| `TerrainRange` | `1024` | How far (studs, around the origin) the backup scans on X/Z. |
-| `TerrainMinY` / `TerrainMaxY` | `-512` / `512` | Height range the backup scans. |
+| `TerrainMinY` / `TerrainMaxY` | `-2048` / `2048` | Height range the backup looks in. Where the terrain is on X/Z is found automatically. |
 
 ---
 
@@ -132,7 +130,7 @@ Without `crypt.base64encode`, a built-in Luau base64 is used. If `writefile` is 
 kSSI saves terrain two ways:
 
 1. **Real data (like other executors).** If the executor can read Terrain's hidden `SmoothGrid` with `gethiddenproperty`, it's written straight into the file and the terrain loads with the place.
-2. **Backup.** Otherwise kSSI reads the voxels itself with `Terrain:ReadVoxels`, compresses them, and saves them in `ReplicatedStorage.kSSI_Terrain`. Open the place in Studio and run this in the command bar:
+2. **Backup.** Otherwise kSSI finds every loaded bit of terrain by itself (raycasting outward until the edges are empty), reads the voxels with `Terrain:ReadVoxels`, compresses them, and saves them in `ReplicatedStorage.kSSI_Terrain`. Open the place in Studio and run this in the command bar:
    ```lua
    require(game.ReplicatedStorage.kSSI_Terrain)()
    ```
