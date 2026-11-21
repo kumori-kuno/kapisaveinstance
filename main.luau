@@ -80,7 +80,7 @@ local DEFAULTS = {
 	Callback = nil, ReadMe = true, YieldEvery = 400, Debug = false,
 	-- terrain: the real SmoothGrid when the executor can read it, otherwise a rebuild module
 	SaveTerrain = true, TerrainBackup = "auto", -- "auto" | "always" | "never"
-	TerrainRange = 1024, TerrainMinY = -512, TerrainMaxY = 512, -- area the backup scans (studs, around 0,0)
+	TerrainMinY = -2048, TerrainMaxY = 2048, -- height range the backup looks in (X/Z is found automatically)
 }
 
 --------------------------------------------------------------- API dump (cached between calls)
@@ -549,18 +549,21 @@ local function saveinstance(target, options)
 	end
 
 	-- backup: read the voxels in 64-stud chunks, keep the non-empty ones, run-length encoded
+	-- backup: find every loaded bit of terrain, then read it in 64-stud chunks
 	local function captureVoxels(terrain)
 		local CHUNK, RES = 64, 4
-		local chunks, cells = {}, 0
-		local fails, lastErr = 0, nil
+		local TOP, BOTTOM = OPTIONS.TerrainMaxY, OPTIONS.TerrainMinY
+		local LIMIT = 16384 -- terrain can't go past this on X/Z
 		local frameStart = os.clock()
-		local range = OPTIONS.TerrainRange
-		local minY, maxY = OPTIONS.TerrainMinY, OPTIONS.TerrainMaxY
-		local scanned, total = 0, math.ceil(2 * range / CHUNK) ^ 2 * math.ceil((maxY - minY) / CHUNK)
-		-- find where terrain actually is first: rays straight down (terrain only) on a 16-stud
-		-- grid. Columns with no hit are skipped whole; the rest only scan up to their top
-		-- (no Include filter: some executors wrap instances, and a wrapped Terrain inside
-		-- RaycastParams silently matches nothing. Parts in the way are stepped through instead.)
+		local function breathe(text)
+			if os.clock() - frameStart > 0.008 then
+				status(text)
+				task.wait()
+				frameStart = os.clock()
+			end
+		end
+
+		-- rays that only count terrain (parts in the way are stepped through)
 		local params = RaycastParams.new()
 		params.IgnoreWater = false
 		local function terrainHit(origin, dir)
@@ -569,7 +572,6 @@ local function saveinstance(target, options)
 				if not hit then return nil end
 				local okT, isTerrain = pcall(function() return hit.Instance:IsA("Terrain") end)
 				if okT and isTerrain then return hit end
-				-- something else is in the way: continue just past it
 				local travelled = (hit.Position - origin).Magnitude + 0.05
 				origin = hit.Position + dir.Unit * 0.05
 				dir = dir.Unit * (dir.Magnitude - travelled)
@@ -577,102 +579,154 @@ local function saveinstance(target, options)
 			end
 			return nil
 		end
-		local colTop = {}
-		local columns = 0
-		for cx = -range, range - 1, CHUNK do
-			for cz = -range, range - 1, CHUNK do
-				local top
-				for ox = 8, CHUNK, 16 do
-					for oz = 8, CHUNK, 16 do
-						local hit = terrainHit(Vector3.new(cx + ox, maxY, cz + oz), Vector3.new(0, minY - maxY, 0))
-						if hit and (not top or hit.Position.Y > top) then top = hit.Position.Y end
-					end
-				end
-				if top then
-					colTop[cx .. "," .. cz] = top
-					columns += 1
-				end
-				if os.clock() - frameStart > 0.008 then
-					status("finding terrain")
-					task.wait()
-					frameStart = os.clock()
-				end
-			end
-		end
-		if columns == 0 then
-			-- rays found nothing (or can't see terrain here): fall back to scanning every column
-			warn("[kSSI] terrain rays found nothing, scanning the whole area instead")
-			for cx = -range, range - 1, CHUNK do
-				for cz = -range, range - 1, CHUNK do colTop[cx .. "," .. cz] = maxY end
-			end
-		end
-		total = 0
-		for _, top in colTop do total += math.ceil((math.min(top + CHUNK, maxY) - minY) / CHUNK) end
-		total = math.max(total, 1)
 
-		for cx = -range, range - 1, CHUNK do
-			for cz = -range, range - 1, CHUNK do
-				local top = colTop[cx .. "," .. cz]
-				if not top then continue end
-				for cy = minY, math.min(top + CHUNK, maxY) - 1, CHUNK do
-					scanned += 1
-					-- yield on a time budget, not a count: never more than ~8 ms of work per frame
-					if os.clock() - frameStart > 0.008 then
-						status(("scanning terrain %d%%"):format(math.floor(scanned / total * 100)))
-						task.wait()
-						frameStart = os.clock()
+		-- probe one 64-stud column: its terrain top and bottom (nil = no terrain)
+		local probed, columns = {}, {}
+		local function probe(cx, cz)
+			local key = cx .. "," .. cz
+			if probed[key] ~= nil then return probed[key] end
+			local top, bottom
+			for ox = 8, CHUNK, 16 do
+				for oz = 8, CHUNK, 16 do
+					local down = terrainHit(Vector3.new(cx + ox, TOP, cz + oz), Vector3.new(0, BOTTOM - TOP, 0))
+					if down then
+						if not top or down.Position.Y > top then top = down.Position.Y end
+						local up = terrainHit(Vector3.new(cx + ox, BOTTOM, cz + oz), Vector3.new(0, TOP - BOTTOM, 0))
+						local b = up and up.Position.Y or BOTTOM
+						if not bottom or b < bottom then bottom = b end
 					end
-					local region = Region3.new(Vector3.new(cx, cy, cz), Vector3.new(cx + CHUNK, cy + CHUNK, cz + CHUNK)):ExpandToGrid(RES)
-					local ok, mats, occs = pcall(function() return terrain:ReadVoxels(region, RES) end)
-					if not ok then fails += 1 lastErr = mats end
-					if ok then
-						-- quick pass: skip the chunk if it's all air
-						local size = mats.Size
-						local empty = true
-						for x = 1, size.X do
-							local ox = occs[x]
-							for y = 1, size.Y do
-								local oy = ox[y]
-								for z = 1, size.Z do
-									if oy[z] > 0 then empty = false break end
-								end
-								if not empty then break end
-							end
-							if not empty then break end
-						end
-						if empty then continue end
-						local runs, any = {}, false
-						local lastM, lastO, run = nil, nil, 0
-						for x = 1, size.X do
-							for y = 1, size.Y do
-								for z = 1, size.Z do
-									local m = mats[x][y][z]
-									local o = math.floor(occs[x][y][z] * 255 + 0.5)
-									if m == Enum.Material.Air then o = 0 end
-									if o > 0 then any = true cells += 1 end
-									local mv = o > 0 and m.Value or 0
-									if mv == lastM and o == lastO and run < 65535 then
-										run += 1
-									else
-										if run > 0 then table.insert(runs, string.pack("<I2BI2", lastM, lastO, run)) end
-										lastM, lastO, run = mv, o, 1
-									end
-								end
-							end
-						end
-						if run > 0 then table.insert(runs, string.pack("<I2BI2", lastM, lastO, run)) end
-						if any then
-							local body = table.concat(runs)
-							table.insert(chunks, string.pack("<iiiBBBI4", cx, cy, cz, size.X, size.Y, size.Z, #body) .. body)
-						end
+				end
+			end
+			local found = top ~= nil
+			probed[key] = found
+			if found then table.insert(columns, { cx = cx, cz = cz, top = top, bottom = bottom }) end
+			breathe(("finding terrain (%d columns)"):format(#columns))
+			return found
+		end
+
+		-- seeds: a sparse grid over the whole world (catches far-away islands), plus the area
+		-- around the origin and the camera
+		local queue = {}
+		local function seed(cx, cz)
+			cx, cz = cx - cx % CHUNK, cz - cz % CHUNK
+			if probe(cx, cz) then table.insert(queue, { cx, cz }) end
+		end
+		for x = -LIMIT, LIMIT - 1, 512 do
+			for z = -LIMIT, LIMIT - 1, 512 do
+				-- one ray per sparse cell, then probe the column it lands in
+				local hit = terrainHit(Vector3.new(x + 256, TOP, z + 256), Vector3.new(0, BOTTOM - TOP, 0))
+				if hit then seed(math.floor(hit.Position.X), math.floor(hit.Position.Z)) end
+				breathe("finding terrain")
+			end
+		end
+		local centers = { Vector3.zero }
+		local cam = workspace.CurrentCamera
+		if cam then table.insert(centers, cam.CFrame.Position) end
+		for _, c in centers do
+			for dx = -512, 511, CHUNK do
+				for dz = -512, 511, CHUNK do seed(math.floor(c.X) + dx, math.floor(c.Z) + dz) end
+			end
+		end
+		-- flood outward: every column with terrain probes its 8 neighbours, until the edges are empty
+		while #queue > 0 do
+			local cell = table.remove(queue)
+			for dx = -CHUNK, CHUNK, CHUNK do
+				for dz = -CHUNK, CHUNK, CHUNK do
+					local nx, nz = cell[1] + dx, cell[2] + dz
+					if math.abs(nx) < LIMIT and math.abs(nz) < LIMIT and probed[nx .. "," .. nz] == nil then
+						if probe(nx, nz) then table.insert(queue, { nx, nz }) end
 					end
 				end
 			end
 		end
-		if fails > 0 then warn(("[kSSI] ReadVoxels failed on %d / %d chunks: %s"):format(fails, scanned, tostring(lastErr))) end
-		return string.pack("<I4", #chunks) .. table.concat(chunks), #chunks, cells
+
+		-- read the voxels, run-length encoded straight into a buffer
+		local out = buffer.create(1024)
+		local cursor = 4
+		local function ensure(n)
+			local need = cursor + n
+			local size = buffer.len(out)
+			if need <= size then return end
+			while size < need do size *= 2 end
+			local bigger = buffer.create(size)
+			buffer.copy(bigger, 0, out, 0, cursor)
+			out = bigger
+		end
+		local chunkCount, cells, fails, lastErr = 0, 0, 0, nil
+		local total, done = 0, 0
+		for _, col in columns do total += math.floor((col.top - col.bottom) / CHUNK) + 2 end
+
+		for _, col in columns do
+			local y0 = math.floor(col.bottom / CHUNK) * CHUNK - CHUNK
+			local y1 = math.floor(col.top / CHUNK) * CHUNK + CHUNK
+			for cy = y0, y1 - 1, CHUNK do
+				done += 1
+				breathe(("saving terrain %d%%"):format(math.floor(math.min(done / total, 1) * 100)))
+				local region = Region3.new(Vector3.new(col.cx, cy, col.cz), Vector3.new(col.cx + CHUNK, cy + CHUNK, col.cz + CHUNK)):ExpandToGrid(RES)
+				local ok, mats, occs = pcall(function() return terrain:ReadVoxels(region, RES) end)
+				if not ok then
+					fails += 1
+					lastErr = mats
+					continue
+				end
+				local size = mats.Size
+				-- header now, body length patched in after
+				ensure(19)
+				local headerAt = cursor
+				buffer.writei32(out, cursor, col.cx)
+				buffer.writei32(out, cursor + 4, cy)
+				buffer.writei32(out, cursor + 8, col.cz)
+				buffer.writeu8(out, cursor + 12, size.X)
+				buffer.writeu8(out, cursor + 13, size.Y)
+				buffer.writeu8(out, cursor + 14, size.Z)
+				cursor += 19
+				local bodyStart = cursor
+				local any = false
+				local lastM, lastO, run = -1, -1, 0
+				local function flush()
+					if run == 0 then return end
+					ensure(5)
+					buffer.writeu16(out, cursor, lastM)
+					buffer.writeu8(out, cursor + 2, lastO)
+					buffer.writeu16(out, cursor + 3, run)
+					cursor += 5
+				end
+				for x = 1, size.X do
+					local mx, ox = mats[x], occs[x]
+					for y = 1, size.Y do
+						local my, oy = mx[y], ox[y]
+						for z = 1, size.Z do
+							local m = my[z]
+							local o = math.floor(oy[z] * 255 + 0.5)
+							if m == Enum.Material.Air then o = 0 end
+							local mv = 0
+							if o > 0 then
+								any = true
+								cells += 1
+								mv = m.Value
+							end
+							if mv == lastM and o == lastO and run < 65535 then
+								run += 1
+							else
+								flush()
+								lastM, lastO, run = mv, o, 1
+							end
+						end
+					end
+				end
+				flush()
+				if any then
+					buffer.writeu32(out, headerAt + 15, cursor - bodyStart)
+					chunkCount += 1
+				else
+					cursor = headerAt -- all air: drop the chunk
+				end
+			end
+		end
+		buffer.writeu32(out, 0, chunkCount)
+		if fails > 0 then warn(("[kSSI] ReadVoxels failed on %d chunks: %s"):format(fails, tostring(lastErr))) end
+		return buffer.readstring(out, 0, cursor), chunkCount, cells
 	end
-
 	local REBUILD_SOURCE = [==[
 -- kSSI terrain backup. Rebuild it from the command bar:
 --     require(game.ReplicatedStorage.kSSI_Terrain)()
@@ -809,7 +863,7 @@ end
 		elseif not okT then
 			warn("[kSSI] terrain backup failed: " .. tostring(blob))
 		else
-			warn(("[kSSI] terrain backup found no terrain in the scanned area (±%d studs, Y %d to %d)"):format(OPTIONS.TerrainRange, OPTIONS.TerrainMinY, OPTIONS.TerrainMaxY))
+			warn(("[kSSI] terrain backup found no loaded terrain (Y %d to %d)"):format(OPTIONS.TerrainMinY, OPTIONS.TerrainMaxY))
 		end
 	elseif isPlace and OPTIONS.SaveTerrain and OPTIONS.TerrainBackup == "auto" then
 		print("[kSSI] terrain: the real SmoothGrid was readable, no backup needed")
