@@ -545,6 +545,7 @@ local function saveinstance(target, options)
 	local function captureVoxels(terrain)
 		local CHUNK, RES = 64, 4
 		local chunks, cells = {}, 0
+		local fails, lastErr = 0, nil
 		local range = OPTIONS.TerrainRange
 		local minY, maxY = OPTIONS.TerrainMinY, OPTIONS.TerrainMaxY
 		local scanned, total = 0, math.ceil(2 * range / CHUNK) ^ 2 * math.ceil((maxY - minY) / CHUNK)
@@ -554,7 +555,8 @@ local function saveinstance(target, options)
 					scanned += 1
 					if scanned % 64 == 0 then status(("scanning terrain %d%%"):format(math.floor(scanned / total * 100))) task.wait() end
 					local region = Region3.new(Vector3.new(cx, cy, cz), Vector3.new(cx + CHUNK, cy + CHUNK, cz + CHUNK)):ExpandToGrid(RES)
-					local ok, mats, occs = pcall(terrain.ReadVoxels, terrain, region, RES)
+					local ok, mats, occs = pcall(function() return terrain:ReadVoxels(region, RES) end)
+					if not ok then fails += 1 lastErr = mats end
 					if ok then
 						local size = mats.Size
 						local runs, any = {}, false
@@ -585,6 +587,7 @@ local function saveinstance(target, options)
 				end
 			end
 		end
+		if fails > 0 then warn(("[kSSI] ReadVoxels failed on %d / %d chunks: %s"):format(fails, scanned, tostring(lastErr))) end
 		return string.pack("<I4", #chunks) .. table.concat(chunks), #chunks, cells
 	end
 
@@ -698,7 +701,11 @@ end
 		if okAt and attrs then table.insert(out, T("BinaryString", "AttributesSerialize", base64(attrs))) end
 		table.insert(out, "</Properties>")
 		for _, child in obj:GetChildren() do write(child) end
-		for _, extra in extraChildren[obj] or {} do table.insert(out, extra) end
+		-- keyed by class: a service can come back as a different reference than the one we looked up
+		if obj.Parent == game then
+			for _, extra in extraChildren[obj.ClassName] or {} do table.insert(out, extra) end
+			extraChildren[obj.ClassName] = nil
+		end
 		table.insert(out, "</Item>")
 	end
 	local function folder(name, items)
@@ -713,17 +720,26 @@ end
 		local okT, blob, chunkCount, cells = pcall(captureVoxels, workspace.Terrain)
 		if okT and chunkCount > 0 then
 			local source = REBUILD_SOURCE:format(base64(blob))
-			local rs = game:GetService("ReplicatedStorage")
-			extraChildren[rs] = extraChildren[rs] or {}
-			table.insert(extraChildren[rs], ('<Item class="ModuleScript" referent="RBX%s"><Properties>%s%s</Properties></Item>'):format(
+			extraChildren.ReplicatedStorage = extraChildren.ReplicatedStorage or {}
+			table.insert(extraChildren.ReplicatedStorage, ('<Item class="ModuleScript" referent="RBX%s"><Properties>%s%s</Properties></Item>'):format(
 				HttpService:GenerateGUID(false):gsub("-", ""), T("string", "Name", "kSSI_Terrain"), T("ProtectedString", "Source", cdata(source))))
 			terrainNote = ("terrain backup: %d chunks, %d filled voxels → run require(game.ReplicatedStorage.kSSI_Terrain)() in Studio"):format(chunkCount, cells)
 		elseif not okT then
 			warn("[kSSI] terrain backup failed: " .. tostring(blob))
+		else
+			warn(("[kSSI] terrain backup found no terrain in the scanned area (±%d studs, Y %d to %d)"):format(OPTIONS.TerrainRange, OPTIONS.TerrainMinY, OPTIONS.TerrainMaxY))
 		end
+	elseif isPlace and OPTIONS.SaveTerrain and OPTIONS.TerrainBackup == "auto" then
+		print("[kSSI] terrain: the real SmoothGrid was readable, no backup needed")
 	end
 
 	for _, r in roots do write(r) end
+	for className, extras in extraChildren do
+		-- its service wasn't saved: give it one so the module still lands there
+		table.insert(out, ('<Item class="%s" referent="RBX%s"><Properties></Properties>'):format(className, HttpService:GenerateGUID(false):gsub("-", "")))
+		for _, extra in extras do table.insert(out, extra) end
+		table.insert(out, "</Item>")
+	end
 	for _, f in extraFolders do folder(f.name, f.items) end
 
 
