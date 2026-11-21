@@ -292,15 +292,72 @@ end
 local PLACE_SERVICES = { "Workspace", "Lighting", "ReplicatedFirst", "ReplicatedStorage", "StarterGui", "StarterPack",
 	"StarterPlayer", "SoundService", "Teams", "Chat", "TextChatService", "MaterialService", "LocalizationService" }
 
+--------------------------------------------------------------- options, every executor's way
+-- Accepts USSI's names, Madium/kAPI's SaveInstanceOptions names, and the common aliases
+-- executors use, in any letter case. Inverted ones are flipped (SavePlayerCharacters → not RemovePlayerCharacters).
+local OPTION_ALIASES = {
+	-- name (lowercased) = { kUSI option, invert? }
+	mode = { "mode" }, savemode = { "mode" },
+	noscripts = { "noscripts" }, ignorescripts = { "noscripts" },
+	decompile = { "Decompile" }, decompilescripts = { "Decompile" }, decomp = { "Decompile" },
+	decompileignore = { "DecompileIgnore" },
+	ignorelist = { "IgnoreList" }, ignoreinstances = { "IgnoreList" },
+	ignoreproperties = { "IgnoreProperties" },
+	ignorenotarchivable = { "IgnoreNotArchivable" }, ignorearchivable = { "IgnoreNotArchivable", true },
+	nilinstances = { "NilInstances" }, savenilinstances = { "NilInstances" }, nilinstancesfix = { "NilInstances" },
+	removeplayercharacters = { "RemovePlayerCharacters" }, saveplayercharacters = { "RemovePlayerCharacters", true },
+	saveplayers = { "SavePlayers" }, isolateplayers = { "SavePlayers" },
+	isolatelocalplayer = { "IsolateLocalPlayer" }, isolatelocalplayercharacter = { "IsolateLocalPlayer" },
+	extrainstances = { "ExtraInstances" },
+	object = { "Object" }, instance = { "Object" },
+	filepath = { "FilePath" }, filename = { "FilePath" }, file = { "FilePath" },
+	savebytecode = { "SaveBytecode" },
+	showstatus = { "ShowStatus" },
+	callback = { "Callback" },
+	readme = { "ReadMe" },
+	debug = { "Debug" }, __debug_mode = { "Debug" },
+	yieldevery = { "YieldEvery" },
+	savenoncreatable = { "SaveNonCreatable" },
+	copytoclipboard = { "CopyToClipboard" },
+	saveterrain = { "SaveTerrain" }, terrainbackup = { "TerrainBackup" },
+	terrainminy = { "TerrainMinY" }, terrainmaxy = { "TerrainMaxY" },
+	-- accepted so scripts written for other savers don't break; nothing to do here
+	disablecompression = { false }, decompileroptions = { false }, antiidle = { false },
+	safemode = { false }, shutdownwhendone = { false }, timeout = { false }, decompiletimeout = { false },
+	avoidfilenamecollision = { false }, alternativewritefile = { false }, ignoredefaultproperties = { false },
+	ignorespecialproperties = { false }, ignoresharedstrings = { false }, sharedstringoverwrite = { false },
+	treatunionsasparts = { false }, isolatestarterplayer = { false },
+}
+local function normalizeOptions(options)
+	local OPTIONS = table.clone(DEFAULTS)
+	OPTIONS.SaveNonCreatable, OPTIONS.CopyToClipboard = false, false
+	for key, value in options or {} do
+		local alias = type(key) == "string" and OPTION_ALIASES[key:lower()]
+		if alias then
+			if alias[1] then
+				if alias[2] and type(value) == "boolean" then value = not value end
+				OPTIONS[alias[1]] = value
+			end
+		elseif type(key) == "string" then
+			OPTIONS[key] = value -- unknown: kept as-is
+		end
+	end
+	if OPTIONS.noscripts then OPTIONS.Decompile = false end
+	if type(OPTIONS.mode) == "string" then OPTIONS.mode = OPTIONS.mode:lower() end
+	return OPTIONS
+end
+
 local function saveinstance(target, options)
 	local START = os.clock()
 	-- USSI table style: saveinstance({ Object = x, ... })
 	if type(target) == "table" and options == nil then
-		options, target = target, target.Object or target.object or game
+		local obj
+		for k, v in target do
+			if type(k) == "string" and (k:lower() == "object" or k:lower() == "instance") then obj = v end
+		end
+		options, target = target, obj or game
 	end
-	local OPTIONS = table.clone(DEFAULTS)
-	for k, v in options or {} do OPTIONS[k] = v end
-	if OPTIONS.noscripts then OPTIONS.Decompile = false end
+	local OPTIONS = normalizeOptions(options)
 	if typeof(target) ~= "Instance" and type(target) ~= "userdata" then error("[kUSI] expected an Instance to save", 2) end
 
 	local status, done = makeStatus(OPTIONS.ShowStatus)
@@ -384,7 +441,7 @@ local function saveinstance(target, options)
 		if obj:IsA("Terrain") then return OPTIONS.SaveTerrain == true end
 		if not isRoot then
 			if obj:IsA("Camera") and obj == workspace.CurrentCamera then return true end
-			if not isCreatable(className) and not obj:IsA("LuaSourceContainer") then return false end
+			if not OPTIONS.SaveNonCreatable and not isCreatable(className) and not obj:IsA("LuaSourceContainer") then return false end
 		end
 		if OPTIONS.IgnoreNotArchivable then
 			local okA, arch = pcall(function() return obj.Archivable end)
@@ -933,6 +990,7 @@ end
 		savedTo = "callback"
 	elseif writefile then
 		writefile(path, xml)
+		if OPTIONS.CopyToClipboard and setclipboard then pcall(setclipboard, xml) end
 	else
 		-- nowhere to write: give the text back (and copy it if we can) so it can be pasted into a file
 		savedTo = nil
