@@ -136,7 +136,9 @@ local function propsOf(className)
 	end
 	local final = {}
 	for _, p in list do
-		if not (p.vt == "ContentId" and twinOf(p.name)) then table.insert(final, p) end
+		-- any legacy property with a Content twin is dropped, whatever its type
+		-- (CharacterMesh.MeshId is an int64 asset id, not a ContentId, but it still conflicts)
+		if not (p.vt ~= "Content" and twinOf(p.name)) then table.insert(final, p) end
 	end
 	list = final
 	propCache[className] = list
