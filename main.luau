@@ -546,6 +546,7 @@ local function saveinstance(target, options)
 		local CHUNK, RES = 64, 4
 		local chunks, cells = {}, 0
 		local fails, lastErr = 0, nil
+		local frameStart = os.clock()
 		local range = OPTIONS.TerrainRange
 		local minY, maxY = OPTIONS.TerrainMinY, OPTIONS.TerrainMaxY
 		local scanned, total = 0, math.ceil(2 * range / CHUNK) ^ 2 * math.ceil((maxY - minY) / CHUNK)
@@ -553,12 +554,31 @@ local function saveinstance(target, options)
 			for cz = -range, range - 1, CHUNK do
 				for cy = minY, maxY - 1, CHUNK do
 					scanned += 1
-					if scanned % 64 == 0 then status(("scanning terrain %d%%"):format(math.floor(scanned / total * 100))) task.wait() end
+					-- yield on a time budget, not a count: never more than ~8 ms of work per frame
+					if os.clock() - frameStart > 0.008 then
+						status(("scanning terrain %d%%"):format(math.floor(scanned / total * 100)))
+						task.wait()
+						frameStart = os.clock()
+					end
 					local region = Region3.new(Vector3.new(cx, cy, cz), Vector3.new(cx + CHUNK, cy + CHUNK, cz + CHUNK)):ExpandToGrid(RES)
 					local ok, mats, occs = pcall(function() return terrain:ReadVoxels(region, RES) end)
 					if not ok then fails += 1 lastErr = mats end
 					if ok then
+						-- quick pass: skip the chunk if it's all air
 						local size = mats.Size
+						local empty = true
+						for x = 1, size.X do
+							local ox = occs[x]
+							for y = 1, size.Y do
+								local oy = ox[y]
+								for z = 1, size.Z do
+									if oy[z] > 0 then empty = false break end
+								end
+								if not empty then break end
+							end
+							if not empty then break end
+						end
+						if empty then continue end
 						local runs, any = {}, false
 						local lastM, lastO, run = nil, nil, 0
 						for x = 1, size.X do
