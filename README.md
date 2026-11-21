@@ -39,7 +39,6 @@ After it loads once, it's also available as the global `saveinstance_kusi`.
 
 | Where | How it saves |
 |---|---|
-| **kAPI** | Built in: kAPI's own `saveinstance` / `saveplace` run kUSI (latest from GitHub, or the copy inside kAPI when offline). |
 | **Any executor** | The loadstring above. Saves with `writefile`. |
 | **No executor** (plain script, script builder...) | Paste the script in (or put it in a ModuleScript and `require` it). Without `writefile`, `saveinstance` returns the file text instead. |
 
