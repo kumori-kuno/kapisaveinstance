@@ -1,4 +1,4 @@
-# kUSI — kAPI Universal Save Instance
+# kUSI - kAPI Universal Save Instance
 
 A full **saveinstance** written in plain Luau, using only standard executor globals.
 Save a whole game as a `.rbxlx`, or any instance as a `.rbxmx`, and it opens cleanly in Roblox Studio.
