@@ -49,7 +49,7 @@ local httpget           = exists("request", "function") and function(url)
 	return r.Body
 end or function(url) return game:HttpGet(url, true) end
 
-if not writefile then error("[kSSI] this executor has no writefile", 0) end
+-- no writefile (plain script, script builder...): the file text is handed back instead
 if not base64encode then
 	-- pure-Luau fallback
 	local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -927,10 +927,16 @@ end
 	local ext = isPlace and ".rbxlx" or ".rbxmx"
 	local path = OPTIONS.FilePath or (isPlace and ("place_" .. game.PlaceId) or (target.Name:gsub("[^%w%-_ ]", "_")))
 	if not path:match("%.rbx[ml]x$") then path ..= ext end
+	local savedTo = path
 	if type(OPTIONS.Callback) == "function" then
 		OPTIONS.Callback(xml)
-	else
+		savedTo = "callback"
+	elseif writefile then
 		writefile(path, xml)
+	else
+		-- nowhere to write: give the text back (and copy it if we can) so it can be pasted into a file
+		savedTo = nil
+		if setclipboard then pcall(setclipboard, xml) end
 	end
 	status(("done: %d instances, %d scripts decompiled"):format(written, decompiled))
 	done()
@@ -939,7 +945,11 @@ end
 	for k, c in skipped do table.insert(list, ("%s ×%d"):format(k, c)) end
 	table.sort(list)
 	print(("[kSSI] %s: %d instances, %d properties, %d scripts decompiled (%.1f KB) in %.2f s")
-		:format(OPTIONS.Callback and "callback" or path, written, props, decompiled, #xml / 1024, os.clock() - START))
+		:format(savedTo or "returned as text", written, props, decompiled, #xml / 1024, os.clock() - START))
+	if not savedTo then
+		print(("[kSSI] no writefile here: saveinstance returned the file text%s. Paste it into a file named %s and open it in Studio.")
+			:format(setclipboard and " and copied it to the clipboard" or "", path))
+	end
 	if terrainNote then print("[kSSI] " .. terrainNote) end
 	if terrainGridIsReal then print("[kSSI] terrain saved from the real SmoothGrid") end
 	if #list > 0 then print("[kSSI] values left out (Studio uses defaults): " .. table.concat(list, ", ")) end
@@ -950,6 +960,8 @@ end
 		table.sort(rows)
 		print("[kSSI] left-out properties:\n" .. table.concat(rows, "\n"))
 	end
+	-- written: the path (like before). Not written: the file text itself
+	if savedTo == nil then return xml end
 	return path
 end
 
