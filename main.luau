@@ -559,10 +559,24 @@ local function saveinstance(target, options)
 		local scanned, total = 0, math.ceil(2 * range / CHUNK) ^ 2 * math.ceil((maxY - minY) / CHUNK)
 		-- find where terrain actually is first: rays straight down (terrain only) on a 16-stud
 		-- grid. Columns with no hit are skipped whole; the rest only scan up to their top
+		-- (no Include filter: some executors wrap instances, and a wrapped Terrain inside
+		-- RaycastParams silently matches nothing. Parts in the way are stepped through instead.)
 		local params = RaycastParams.new()
-		params.FilterType = Enum.RaycastFilterType.Include
-		params.FilterDescendantsInstances = { terrain }
 		params.IgnoreWater = false
+		local function terrainHit(origin, dir)
+			for _ = 1, 24 do
+				local hit = workspace:Raycast(origin, dir, params)
+				if not hit then return nil end
+				local okT, isTerrain = pcall(function() return hit.Instance:IsA("Terrain") end)
+				if okT and isTerrain then return hit end
+				-- something else is in the way: continue just past it
+				local travelled = (hit.Position - origin).Magnitude + 0.05
+				origin = hit.Position + dir.Unit * 0.05
+				dir = dir.Unit * (dir.Magnitude - travelled)
+				if dir.Magnitude <= 0.1 then return nil end
+			end
+			return nil
+		end
 		local colTop = {}
 		local columns = 0
 		for cx = -range, range - 1, CHUNK do
@@ -570,7 +584,7 @@ local function saveinstance(target, options)
 				local top
 				for ox = 8, CHUNK, 16 do
 					for oz = 8, CHUNK, 16 do
-						local hit = workspace:Raycast(Vector3.new(cx + ox, maxY, cz + oz), Vector3.new(0, minY - maxY, 0), params)
+						local hit = terrainHit(Vector3.new(cx + ox, maxY, cz + oz), Vector3.new(0, minY - maxY, 0))
 						if hit and (not top or hit.Position.Y > top) then top = hit.Position.Y end
 					end
 				end
@@ -583,6 +597,13 @@ local function saveinstance(target, options)
 					task.wait()
 					frameStart = os.clock()
 				end
+			end
+		end
+		if columns == 0 then
+			-- rays found nothing (or can't see terrain here): fall back to scanning every column
+			warn("[kSSI] terrain rays found nothing, scanning the whole area instead")
+			for cx = -range, range - 1, CHUNK do
+				for cz = -range, range - 1, CHUNK do colTop[cx .. "," .. cz] = maxY end
 			end
 		end
 		total = 0
