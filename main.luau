@@ -78,6 +78,9 @@ local DEFAULTS = {
 	RemovePlayerCharacters = true, SavePlayers = false, IsolateLocalPlayer = false,
 	ExtraInstances = {}, FilePath = nil, SaveBytecode = false, ShowStatus = true,
 	Callback = nil, ReadMe = true, YieldEvery = 400, Debug = false,
+	-- terrain: the real SmoothGrid when the executor can read it, otherwise a rebuild module
+	SaveTerrain = true, TerrainBackup = "auto", -- "auto" | "always" | "never"
+	TerrainRange = 1024, TerrainMinY = -512, TerrainMaxY = 512, -- area the backup scans (studs, around 0,0)
 }
 
 --------------------------------------------------------------- API dump (cached between calls)
@@ -346,7 +349,7 @@ local function saveinstance(target, options)
 		local okC, className = pcall(function() return obj.ClassName end)
 		if not okC or ignoreClass[className] then return false end
 		if obj:IsA("Players") and not OPTIONS.SavePlayers then return false end
-		if obj:IsA("Terrain") then return false end
+		if obj:IsA("Terrain") then return OPTIONS.SaveTerrain == true end
 		if not isRoot then
 			if obj:IsA("Camera") and obj == workspace.CurrentCamera then return true end
 			if not isCreatable(className) and not obj:IsA("LuaSourceContainer") then return false end
@@ -514,6 +517,139 @@ local function saveinstance(target, options)
 
 	local out = { '<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" version="4">', "<External>null</External><External>nil</External>" }
 	local written, props = 0, 0
+
+	------------------------------------------------ terrain
+	-- MaterialColors: 6 zero bytes, then RGB for each terrain material in this order
+	local TERRAIN_MATERIALS = { "Grass", "Slate", "Concrete", "Brick", "Sand", "WoodPlanks", "Rock", "Glacier", "Snow",
+		"Sandstone", "Mud", "Basalt", "Ground", "CrackedLava", "Asphalt", "Cobblestone", "Ice", "LeafyGrass", "Salt",
+		"Limestone", "Pavement" }
+	local function materialColorsBlob(terrain)
+		local parts = { string.rep("\0", 6) }
+		for _, name in TERRAIN_MATERIALS do
+			local ok, c = pcall(terrain.GetMaterialColor, terrain, Enum.Material[name])
+			if not ok then c = Color3.new(0.5, 0.5, 0.5) end
+			table.insert(parts, string.char(math.clamp(math.floor(c.R * 255 + 0.5), 0, 255), math.clamp(math.floor(c.G * 255 + 0.5), 0, 255), math.clamp(math.floor(c.B * 255 + 0.5), 0, 255)))
+		end
+		return table.concat(parts)
+	end
+	local terrainGridIsReal = false
+	local extraChildren = {} -- instance → extra <Item> text written inside it
+	local function readTerrainBlob(terrain, name)
+		if not gethiddenproperty then return nil end
+		local ok, v = pcall(gethiddenproperty, terrain, name)
+		if ok and type(v) == "string" and #v > 0 then return v end
+		return nil
+	end
+
+	-- backup: read the voxels in 64-stud chunks, keep the non-empty ones, run-length encoded
+	local function captureVoxels(terrain)
+		local CHUNK, RES = 64, 4
+		local chunks, cells = {}, 0
+		local range = OPTIONS.TerrainRange
+		local minY, maxY = OPTIONS.TerrainMinY, OPTIONS.TerrainMaxY
+		local scanned, total = 0, math.ceil(2 * range / CHUNK) ^ 2 * math.ceil((maxY - minY) / CHUNK)
+		for cx = -range, range - 1, CHUNK do
+			for cz = -range, range - 1, CHUNK do
+				for cy = minY, maxY - 1, CHUNK do
+					scanned += 1
+					if scanned % 64 == 0 then status(("scanning terrain %d%%"):format(math.floor(scanned / total * 100))) task.wait() end
+					local region = Region3.new(Vector3.new(cx, cy, cz), Vector3.new(cx + CHUNK, cy + CHUNK, cz + CHUNK)):ExpandToGrid(RES)
+					local ok, mats, occs = pcall(terrain.ReadVoxels, terrain, region, RES)
+					if ok then
+						local size = mats.Size
+						local runs, any = {}, false
+						local lastM, lastO, run = nil, nil, 0
+						for x = 1, size.X do
+							for y = 1, size.Y do
+								for z = 1, size.Z do
+									local m = mats[x][y][z]
+									local o = math.floor(occs[x][y][z] * 255 + 0.5)
+									if m == Enum.Material.Air then o = 0 end
+									if o > 0 then any = true cells += 1 end
+									local mv = o > 0 and m.Value or 0
+									if mv == lastM and o == lastO and run < 65535 then
+										run += 1
+									else
+										if run > 0 then table.insert(runs, string.pack("<I2BI2", lastM, lastO, run)) end
+										lastM, lastO, run = mv, o, 1
+									end
+								end
+							end
+						end
+						if run > 0 then table.insert(runs, string.pack("<I2BI2", lastM, lastO, run)) end
+						if any then
+							local body = table.concat(runs)
+							table.insert(chunks, string.pack("<iiiBBBI4", cx, cy, cz, size.X, size.Y, size.Z, #body) .. body)
+						end
+					end
+				end
+			end
+		end
+		return string.pack("<I4", #chunks) .. table.concat(chunks), #chunks, cells
+	end
+
+	local REBUILD_SOURCE = [==[
+-- kSSI terrain backup. Rebuild it from the command bar:
+--     require(game.ReplicatedStorage.kSSI_Terrain)()
+local DATA = [=[%s]=]
+
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local function decode(s)
+	local map = {}
+	for i = 1, 64 do map[B64:byte(i)] = i - 1 end
+	local out, bits, n = buffer.create(#s * 3 // 4 + 3), 0, 0
+	local len, acc = 0, 0
+	for i = 1, #s do
+		local v = map[s:byte(i)]
+		if v then
+			acc = acc * 64 + v
+			bits += 6
+			if bits >= 8 then
+				bits -= 8
+				local byte = acc // (2 ^ bits)
+				acc -= byte * (2 ^ bits)
+				buffer.writeu8(out, len, byte)
+				len += 1
+			end
+		end
+	end
+	return buffer.readstring(out, 0, len)
+end
+
+return function()
+	local data = decode(DATA)
+	local terrain = workspace.Terrain
+	local materials = {}
+	for _, m in Enum.Material:GetEnumItems() do materials[m.Value] = m end
+	local count, pos = string.unpack("<I4", data, 1)
+	for c = 1, count do
+		local cx, cy, cz, sx, sy, sz, bodyLen
+		cx, cy, cz, sx, sy, sz, bodyLen, pos = string.unpack("<iiiBBBI4", data, pos)
+		local stop = pos + bodyLen
+		local mats, occs = {}, {}
+		for x = 1, sx do
+			mats[x], occs[x] = {}, {}
+			for y = 1, sy do mats[x][y], occs[x][y] = {}, {} end
+		end
+		local x, y, z = 1, 1, 1
+		while pos < stop do
+			local mv, o, run
+			mv, o, run, pos = string.unpack("<I2BI2", data, pos)
+			local m = o > 0 and materials[mv] or Enum.Material.Air
+			for _ = 1, run do
+				mats[x][y][z], occs[x][y][z] = m, o / 255
+				z += 1
+				if z > sz then z = 1 y += 1 if y > sy then y = 1 x += 1 end end
+			end
+		end
+		local region = Region3.new(Vector3.new(cx, cy, cz), Vector3.new(cx + sx * 4, cy + sy * 4, cz + sz * 4)):ExpandToGrid(4)
+		terrain:WriteVoxels(region, 4, mats, occs)
+		if c % 32 == 0 then task.wait() end
+	end
+	print(("[kSSI] terrain rebuilt: %%d chunks"):format(count))
+end
+]==]
+
 	local function write(obj)
 		local ref = refs[obj]
 		if not ref then return end
@@ -524,8 +660,22 @@ local function saveinstance(target, options)
 		end
 		table.insert(out, ('<Item class="%s" referent="%s"><Properties>'):format(obj.ClassName, ref))
 		local isScript = obj:IsA("LuaSourceContainer")
+		local isTerrain = obj:IsA("Terrain")
+		if isTerrain then
+			-- the real voxel data when the executor can read it (like other executors' savers)
+			local grid = readTerrainBlob(obj, "SmoothGrid")
+			if grid then
+				terrainGridIsReal = true
+				table.insert(out, T("BinaryString", "SmoothGrid", base64(grid)))
+				local physics = readTerrainBlob(obj, "PhysicsGrid")
+				if physics then table.insert(out, T("BinaryString", "PhysicsGrid", base64(physics))) end
+			end
+			local colors = readTerrainBlob(obj, "MaterialColors") or materialColorsBlob(obj)
+			table.insert(out, T("BinaryString", "MaterialColors", base64(colors)))
+		end
 		for _, p in propsOf(obj.ClassName) do
 			if ignoreProp[p.name] then continue end
+			if isTerrain and (p.name == "SmoothGrid" or p.name == "PhysicsGrid" or p.name == "MaterialColors") then continue end
 			if scriptsOnly and not isScript and p.name ~= "Name" then continue end
 			local ok, v
 			if p.name == "Source" and isScript then ok, v = true, scriptSource(obj)
@@ -548,6 +698,7 @@ local function saveinstance(target, options)
 		if okAt and attrs then table.insert(out, T("BinaryString", "AttributesSerialize", base64(attrs))) end
 		table.insert(out, "</Properties>")
 		for _, child in obj:GetChildren() do write(child) end
+		for _, extra in extraChildren[obj] or {} do table.insert(out, extra) end
 		table.insert(out, "</Item>")
 	end
 	local function folder(name, items)
@@ -555,8 +706,27 @@ local function saveinstance(target, options)
 		for _, obj in items do write(obj) end
 		table.insert(out, "</Item>")
 	end
+	-- terrain backup module (when the real grid couldn't be read, or always if asked)
+	local terrainNote = nil
+	if isPlace and OPTIONS.SaveTerrain and OPTIONS.TerrainBackup ~= "never"
+		and (OPTIONS.TerrainBackup == "always" or not readTerrainBlob(workspace.Terrain, "SmoothGrid")) then
+		local okT, blob, chunkCount, cells = pcall(captureVoxels, workspace.Terrain)
+		if okT and chunkCount > 0 then
+			local source = REBUILD_SOURCE:format(base64(blob))
+			local rs = game:GetService("ReplicatedStorage")
+			extraChildren[rs] = extraChildren[rs] or {}
+			table.insert(extraChildren[rs], ('<Item class="ModuleScript" referent="RBX%s"><Properties>%s%s</Properties></Item>'):format(
+				HttpService:GenerateGUID(false):gsub("-", ""), T("string", "Name", "kSSI_Terrain"), T("ProtectedString", "Source", cdata(source))))
+			terrainNote = ("terrain backup: %d chunks, %d filled voxels → run require(game.ReplicatedStorage.kSSI_Terrain)() in Studio"):format(chunkCount, cells)
+		elseif not okT then
+			warn("[kSSI] terrain backup failed: " .. tostring(blob))
+		end
+	end
+
 	for _, r in roots do write(r) end
 	for _, f in extraFolders do folder(f.name, f.items) end
+
+
 	if OPTIONS.ReadMe and isPlace then
 		local exec = select(1, pcall(identifyexecutor)) and identifyexecutor() or "Unknown"
 		table.insert(out, ('<Item class="Script" referent="RBX%s"><Properties>%s%s%s</Properties></Item>'):format(
@@ -589,6 +759,8 @@ local function saveinstance(target, options)
 	table.sort(list)
 	print(("[kSSI] %s: %d instances, %d properties, %d scripts decompiled (%.1f KB) in %.2f s")
 		:format(OPTIONS.Callback and "callback" or path, written, props, decompiled, #xml / 1024, os.clock() - START))
+	if terrainNote then print("[kSSI] " .. terrainNote) end
+	if terrainGridIsReal then print("[kSSI] terrain saved from the real SmoothGrid") end
 	if #list > 0 then print("[kSSI] values left out (Studio uses defaults): " .. table.concat(list, ", ")) end
 	for why, n in decompileFails do warn(("[kSSI] decompile failed ×%d: %s"):format(n, why)) end
 	if OPTIONS.Debug then
