@@ -105,7 +105,7 @@ Without `crypt.base64encode`, a built-in Luau base64 is used.
 
 ## Terrain
 
-kSSI saves terrain two ways:
+kUSI saves terrain two ways:
 
 1. **Real data (like other executors).** If the executor can read Terrain's hidden `SmoothGrid` with `gethiddenproperty`, it's written straight into the file and the terrain loads with the place.
 2. **Backup.** Otherwise kSSI finds every loaded bit of terrain by itself (raycasting outward until the edges are empty), reads the voxels with `Terrain:ReadVoxels`, compresses them, and saves them in `ReplicatedStorage.kSSI_Terrain`. Open the place in Studio and run this in the command bar:
