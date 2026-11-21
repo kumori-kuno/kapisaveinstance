@@ -10,30 +10,9 @@ Made for and tested on **[kAPI](#about-kapi)**. It only needs common executor fu
 ## Quick start
 
 ```lua
-local config = {
-    ["Debug"] = false,
-    ["mode"] = "optimized",
-    ["noscripts"] = false,
-    ["Decompile"] = true,
-    ["DecompileIgnore"] = {},
-    ["NilInstances"] = true,
-    ["IgnoreList"] = {},
-    ["IgnoreProperties"] = {},
-    ["IgnoreNotArchivable"] = false,
-    ["RemovePlayerCharacters"] = false,
-    ["SavePlayers"] = true,
-    ["IsolateLocalPlayer"] = false,
-    ["ExtraInstances"] = {},
-    ["FilePath"] = nil,
-    ["SaveBytecode"] = false,
-    ["ShowStatus"] = true,
-    ["Callback"] = nil,
-    ["ReadMe"] = true,
-    ["YieldEvery"] = 400,
-}
 local saveinstance = loadstring(game:HttpGet("https://raw.githubusercontent.com/kumori-kuno/kapisaveinstance/refs/heads/main/main.luau"))()
 
-saveinstance(game,config)               -- the whole place → place_<PlaceId>.rbxlx
+saveinstance(game)               -- the whole place → place_<PlaceId>.rbxlx
 saveinstance(workspace.MyModel)  -- one instance  → MyModel.rbxmx
 ```
 
@@ -66,6 +45,30 @@ After it loads once, it's also available as the global `saveinstance_kssi`.
 ---
 
 ## Options
+
+```lua
+local config = {
+    ["Debug"] = false,
+    ["mode"] = "optimized",
+    ["noscripts"] = false,
+    ["Decompile"] = true,
+    ["DecompileIgnore"] = {},
+    ["NilInstances"] = true,
+    ["IgnoreList"] = {},
+    ["IgnoreProperties"] = {},
+    ["IgnoreNotArchivable"] = false,
+    ["RemovePlayerCharacters"] = false,
+    ["SavePlayers"] = true,
+    ["IsolateLocalPlayer"] = false,
+    ["ExtraInstances"] = {},
+    ["FilePath"] = nil,
+    ["SaveBytecode"] = false,
+    ["ShowStatus"] = true,
+    ["Callback"] = nil,
+    ["ReadMe"] = true,
+    ["YieldEvery"] = 400,
+}
+```
 
 | Option | Default | What it does |
 |---|---|---|
