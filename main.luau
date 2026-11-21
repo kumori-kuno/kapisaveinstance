@@ -552,9 +552,43 @@ local function saveinstance(target, options)
 		local range = OPTIONS.TerrainRange
 		local minY, maxY = OPTIONS.TerrainMinY, OPTIONS.TerrainMaxY
 		local scanned, total = 0, math.ceil(2 * range / CHUNK) ^ 2 * math.ceil((maxY - minY) / CHUNK)
+		-- find where terrain actually is first: rays straight down (terrain only) on a 16-stud
+		-- grid. Columns with no hit are skipped whole; the rest only scan up to their top
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Include
+		params.FilterDescendantsInstances = { terrain }
+		params.IgnoreWater = false
+		local colTop = {}
+		local columns = 0
 		for cx = -range, range - 1, CHUNK do
 			for cz = -range, range - 1, CHUNK do
-				for cy = minY, maxY - 1, CHUNK do
+				local top
+				for ox = 8, CHUNK, 16 do
+					for oz = 8, CHUNK, 16 do
+						local hit = workspace:Raycast(Vector3.new(cx + ox, maxY, cz + oz), Vector3.new(0, minY - maxY, 0), params)
+						if hit and (not top or hit.Position.Y > top) then top = hit.Position.Y end
+					end
+				end
+				if top then
+					colTop[cx .. "," .. cz] = top
+					columns += 1
+				end
+				if os.clock() - frameStart > 0.008 then
+					status("finding terrain")
+					task.wait()
+					frameStart = os.clock()
+				end
+			end
+		end
+		total = 0
+		for _, top in colTop do total += math.ceil((math.min(top + CHUNK, maxY) - minY) / CHUNK) end
+		total = math.max(total, 1)
+
+		for cx = -range, range - 1, CHUNK do
+			for cz = -range, range - 1, CHUNK do
+				local top = colTop[cx .. "," .. cz]
+				if not top then continue end
+				for cy = minY, math.min(top + CHUNK, maxY) - 1, CHUNK do
 					scanned += 1
 					-- yield on a time budget, not a count: never more than ~8 ms of work per frame
 					if os.clock() - frameStart > 0.008 then
