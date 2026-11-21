@@ -31,7 +31,7 @@ The USSI-style table call works too:
 saveinstance({ Object = workspace.MyModel, mode = "scripts" })
 ```
 
-After it loads once, it's also available as the global `saveinstance_kssi`.
+After it loads once, it's also available as the global `saveinstance_kusi`.
 
 ---
 
@@ -45,6 +45,34 @@ After it loads once, it's also available as the global `saveinstance_kssi`.
 ---
 
 ## Options
+
+```lua
+local config = {
+	["Debug"] = false,
+	["mode"] = "optimized", -- "optimized" | "full" | "scripts"
+	["noscripts"] = false,
+	["Decompile"] = true,
+	["DecompileIgnore"] = {},
+	["NilInstances"] = true,
+	["IgnoreList"] = {},
+	["IgnoreProperties"] = {},
+	["IgnoreNotArchivable"] = false,
+	["RemovePlayerCharacters"] = false,
+	["SavePlayers"] = true,
+	["IsolateLocalPlayer"] = false,
+	["ExtraInstances"] = {},
+	["FilePath"] = nil,
+	["SaveBytecode"] = false,
+	["ShowStatus"] = true,
+	["Callback"] = nil,
+	["ReadMe"] = true,
+	["YieldEvery"] = 400,
+	["SaveTerrain"] = true,
+	["TerrainBackup"] = "auto", -- "auto" | "always" | "never"
+	["TerrainMinY"] = -512,
+	["TerrainMaxY"] = 512,
+}
+```
 
 | Option | Default | What it does |
 |---|---|---|
@@ -108,9 +136,9 @@ Without `crypt.base64encode`, a built-in Luau base64 is used.
 kUSI saves terrain two ways:
 
 1. **Real data (like other executors).** If the executor can read Terrain's hidden `SmoothGrid` with `gethiddenproperty`, it's written straight into the file and the terrain loads with the place.
-2. **Backup.** Otherwise kSSI finds every loaded bit of terrain by itself (raycasting outward until the edges are empty), reads the voxels with `Terrain:ReadVoxels`, compresses them, and saves them in `ReplicatedStorage.kSSI_Terrain`. Open the place in Studio and run this in the command bar:
+2. **Backup.** Otherwise kUSI finds every loaded bit of terrain by itself (raycasting outward until the edges are empty), reads the voxels with `Terrain:ReadVoxels`, compresses them, and saves them in `ReplicatedStorage.kUSI_Terrain`. Open the place in Studio and run this in the command bar:
    ```lua
-   require(game.ReplicatedStorage.kSSI_Terrain)()
+   require(game.ReplicatedStorage.kUSI_Terrain)()
    ```
 
 Terrain colors (`MaterialColors`) are always saved. On the client, only terrain that's loaded can be read, so with streaming on, far-away terrain may be missing.
