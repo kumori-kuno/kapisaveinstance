@@ -307,6 +307,11 @@ local function saveinstance(target, options)
 			local ok, v = pcall(gethiddenproperty, obj, p.name)
 			if ok and v ~= nil then return true, v end
 		end
+		-- InitialSize (the mesh's own size) is also readable as MeshSize
+		if p.name == "InitialSize" then
+			local ok, v = pcall(function() return obj.MeshSize end)
+			if ok and typeof(v) == "Vector3" then return true, v end
+		end
 		return false
 	end
 	local decompiled = 0
