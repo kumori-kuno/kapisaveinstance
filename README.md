@@ -3,6 +3,7 @@ save isntace for kAPI
 
 ```luau
 local config = {
+	["Debug"] = false,
 	["mode"] = "optimized",
 	["noscripts"] = false,
 	["Decompile"] = true,
