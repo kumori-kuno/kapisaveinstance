@@ -44,10 +44,24 @@ local writefile         = exists("writefile", "function")
 local gethui            = exists({ "gethui", "get_hidden_gui" }, "function")
 local protectgui        = exists({ "protectgui", "protect_gui", "syn.protect_gui" }, "function")
 local setclipboard      = exists({ "setclipboard", "toclipboard", "set_clipboard" }, "function")
-local httpget           = exists("request", "function") and function(url)
-	local r = exists("request", "function")({ Url = url, Method = "GET" })
-	return r.Body
-end or function(url) return game:HttpGet(url, true) end
+-- downloads: executor request → game:HttpGet → HttpService:GetAsync (plain server scripts
+-- with HTTP requests enabled), first one that works
+local requestFn = exists({ "request", "http_request", "http.request", "syn.request" }, "function")
+local function httpget(url)
+	local errors = {}
+	if requestFn then
+		local ok, r = pcall(requestFn, { Url = url, Method = "GET" })
+		if ok and type(r) == "table" and type(r.Body) == "string" and (r.StatusCode == nil or r.StatusCode < 400) then return r.Body end
+		table.insert(errors, "request: " .. tostring(ok and (type(r) == "table" and r.StatusCode) or r))
+	end
+	local ok1, body1 = pcall(function() return game:HttpGet(url, true) end)
+	if ok1 and type(body1) == "string" then return body1 end
+	table.insert(errors, "HttpGet: " .. tostring(body1))
+	local ok2, body2 = pcall(function() return game:GetService("HttpService"):GetAsync(url) end)
+	if ok2 and type(body2) == "string" then return body2 end
+	table.insert(errors, "GetAsync: " .. tostring(body2))
+	error("[kUSI] couldn't download " .. url .. " (" .. table.concat(errors, " / ") .. ")", 0)
+end
 
 -- no writefile (plain script, script builder...): the file text is handed back instead
 if not base64encode then
