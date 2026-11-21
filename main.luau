@@ -77,7 +77,7 @@ local DEFAULTS = {
 	IgnoreList = {}, IgnoreProperties = {}, IgnoreNotArchivable = true, NilInstances = false,
 	RemovePlayerCharacters = true, SavePlayers = false, IsolateLocalPlayer = false,
 	ExtraInstances = {}, FilePath = nil, SaveBytecode = false, ShowStatus = true,
-	Callback = nil, ReadMe = true, YieldEvery = 400,
+	Callback = nil, ReadMe = true, YieldEvery = 400, Debug = false,
 }
 
 --------------------------------------------------------------- API dump (cached between calls)
@@ -126,7 +126,7 @@ local function propsOf(className)
 		SkyboxUp = "SkyboxUpContent", MoonTextureId = "MoonTextureContent", SunTextureId = "SunTextureContent",
 	}
 	local function twinOf(n)
-		for _, c in { SPECIAL[n], n .. "Content", (n:gsub("Id$", "Content")) } do
+		for _, c in { SPECIAL[n], n .. "Content", (n:gsub("I[dD]$", "Content")), (n:gsub("TextureI[dD]$", "TextureContent")) } do
 			if c and contentNames[c] then return c end
 		end
 		return nil
@@ -305,15 +305,27 @@ local function saveinstance(target, options)
 		return false
 	end
 	local decompiled = 0
+	local decompileFails = {}
 	local function scriptSource(obj)
 		local src
 		if OPTIONS.noscripts then
 			src = "-- kSSI: noscripts is on"
 		elseif decompileIgnore[obj] or decompileIgnore[obj.ClassName] then
 			src = "-- kSSI: in DecompileIgnore"
-		elseif OPTIONS.Decompile and decompile then
-			local ok, out = pcall(decompile, obj)
-			if ok and type(out) == "string" and out ~= "" then src = out decompiled += 1 end
+		elseif OPTIONS.Decompile then
+			local fn = decompile or exists({ "decompile", "Decompile" }, "function")
+			if not fn then
+				decompileFails["decompile is missing"] = (decompileFails["decompile is missing"] or 0) + 1
+			else
+				local ok, out = pcall(fn, obj)
+				if ok and type(out) == "string" and out ~= "" then
+					src = out
+					decompiled += 1
+				else
+					local why = ok and ("returned " .. typeof(out)) or tostring(out):sub(1, 120)
+					decompileFails[why] = (decompileFails[why] or 0) + 1
+				end
+			end
 		end
 		src = src or "-- kSSI: couldn't decompile this script"
 		if OPTIONS.SaveBytecode and getscriptbytecode then
@@ -391,11 +403,16 @@ local function saveinstance(target, options)
 
 	------------------------------------------------ pass 2: write
 	local skipped = {}
-	local function skip(vt) skipped[vt] = (skipped[vt] or 0) + 1 return nil end
+	local leftOut = {}
+	local currentObj
+	local function skip(vt)
+		skipped[vt] = (skipped[vt] or 0) + 1
+		return nil
+	end
 	local encode
 	do
 		local OPTIONS_ENCODE = nil
-
+		
 		encode = function(p, v)
 			local name, vt = p.name, p.vt
 			if p.cat == "Enum" then
@@ -492,7 +509,7 @@ local function saveinstance(target, options)
 			end
 			return skip(vt)
 		end
-
+		
 	end
 
 	local out = { '<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" version="4">', "<External>null</External><External>nil</External>" }
@@ -515,7 +532,14 @@ local function saveinstance(target, options)
 			else ok, v = read(obj, p) end
 			if ok then
 				local okE, enc = pcall(encode, p, v)
-				if okE and enc then table.insert(out, enc) props += 1 elseif not okE then skip(p.vt .. "!") end
+				if okE and enc then table.insert(out, enc) props += 1
+				else
+					if not okE then skip(p.vt .. "!") end
+					local key = obj.ClassName .. "." .. p.name
+					local e = leftOut[key]
+					if not e then e = { n = 0, want = p.vt, got = typeof(v) } leftOut[key] = e end
+					e.n += 1
+				end
 			end
 		end
 		local tags = CollectionService:GetTags(obj)
@@ -566,6 +590,13 @@ local function saveinstance(target, options)
 	print(("[kSSI] %s: %d instances, %d properties, %d scripts decompiled (%.1f KB) in %.2f s")
 		:format(OPTIONS.Callback and "callback" or path, written, props, decompiled, #xml / 1024, os.clock() - START))
 	if #list > 0 then print("[kSSI] values left out (Studio uses defaults): " .. table.concat(list, ", ")) end
+	for why, n in decompileFails do warn(("[kSSI] decompile failed ×%d: %s"):format(n, why)) end
+	if OPTIONS.Debug then
+		local rows = {}
+		for key, e in leftOut do table.insert(rows, ("   %s ×%d (wants %s, got %s)"):format(key, e.n, e.want, e.got)) end
+		table.sort(rows)
+		print("[kSSI] left-out properties:\n" .. table.concat(rows, "\n"))
+	end
 	return path
 end
 
