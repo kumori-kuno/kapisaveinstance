@@ -2,7 +2,7 @@
 save isntace for kAPI
 
 ```luau
-config = {
+local config = {
 	["mode"] = "optimized",
 	["noscripts"] = false,
 	["Decompile"] = true,
