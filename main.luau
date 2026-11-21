@@ -1,7 +1,7 @@
 --[[
-	kSSI — kAPI's take on UniversalSynSaveInstance, built only on executor globals.
+	kUSI (kAPI Universal Save Instance) — kAPI's take on UniversalSynSaveInstance, built only on executor globals.
 
-	local saveinstance = loadstring(readfile("kSSI.lua"))()  -- or paste and call directly
+	local saveinstance = loadstring(readfile("kUSI.lua"))()  -- or paste and call directly
 	saveinstance(game)                       → place file (.rbxlx) of game's children
 	saveinstance(workspace.Model)            → model file (.rbxmx) of that instance
 	saveinstance(game, { noscripts = true }) → with options
@@ -269,7 +269,7 @@ end
 local function makeStatus(enabled)
 	if not enabled then return function() end, function() end end
 	local gui = Instance.new("ScreenGui")
-	gui.Name = "kSSI"
+	gui.Name = "kUSI"
 	gui.IgnoreGuiInset = true
 	gui.DisplayOrder = 1e6
 	local label = Instance.new("TextLabel")
@@ -279,13 +279,13 @@ local function makeStatus(enabled)
 	label.TextColor3 = Color3.new(1, 1, 1)
 	label.Font = Enum.Font.Code
 	label.TextSize = 16
-	label.Text = "kSSI: starting"
+	label.Text = "kUSI: starting"
 	label.Parent = gui
 	if protectgui then pcall(protectgui, gui) end
 	local parent = gethui and select(2, pcall(gethui))
 	if typeof(parent) ~= "Instance" and type(parent) ~= "userdata" then parent = game:GetService("CoreGui") end
 	if not pcall(function() gui.Parent = parent end) then gui.Parent = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui") end
-	return function(text) label.Text = "kSSI: " .. text end, function() task.delay(2, gui.Destroy, gui) end
+	return function(text) label.Text = "kUSI: " .. text end, function() task.delay(2, gui.Destroy, gui) end
 end
 
 --------------------------------------------------------------- the saver
@@ -301,7 +301,7 @@ local function saveinstance(target, options)
 	local OPTIONS = table.clone(DEFAULTS)
 	for k, v in options or {} do OPTIONS[k] = v end
 	if OPTIONS.noscripts then OPTIONS.Decompile = false end
-	if typeof(target) ~= "Instance" and type(target) ~= "userdata" then error("[kSSI] expected an Instance to save", 2) end
+	if typeof(target) ~= "Instance" and type(target) ~= "userdata" then error("[kUSI] expected an Instance to save", 2) end
 
 	local status, done = makeStatus(OPTIONS.ShowStatus)
 	status("downloading the API dump")
@@ -344,9 +344,9 @@ local function saveinstance(target, options)
 	local function scriptSource(obj)
 		local src
 		if OPTIONS.noscripts then
-			src = "-- kSSI: noscripts is on"
+			src = "-- kUSI: noscripts is on"
 		elseif decompileIgnore[obj] or decompileIgnore[obj.ClassName] then
-			src = "-- kSSI: in DecompileIgnore"
+			src = "-- kUSI: in DecompileIgnore"
 		elseif OPTIONS.Decompile then
 			local fn = decompile or exists({ "decompile", "Decompile" }, "function")
 			if not fn then
@@ -362,7 +362,7 @@ local function saveinstance(target, options)
 				end
 			end
 		end
-		src = src or "-- kSSI: couldn't decompile this script"
+		src = src or "-- kUSI: couldn't decompile this script"
 		if OPTIONS.SaveBytecode and getscriptbytecode then
 			local ok, bc = pcall(getscriptbytecode, obj)
 			if ok and type(bc) == "string" and bc ~= "" then src ..= "\n\n--[[ bytecode (base64)\n" .. base64(bc) .. "\n]]" end
@@ -749,13 +749,13 @@ local function saveinstance(target, options)
 			end
 		end
 		buffer.writeu32(out, 0, chunkCount)
-		if fails > 0 then warn(("[kSSI] ReadVoxels failed on %d chunks: %s"):format(fails, tostring(lastErr))) end
+		if fails > 0 then warn(("[kUSI] ReadVoxels failed on %d chunks: %s"):format(fails, tostring(lastErr))) end
 		return buffer.readstring(out, 0, cursor), chunkCount, cells
 	end
 	local REBUILD_SOURCE = [==[
--- kSSI terrain backup. Rebuild it from the command bar:
---     require(game.ReplicatedStorage.kSSI_Terrain)()
-local DATA = [=[__KSSI_DATA__]=]
+-- kUSI terrain backup. Rebuild it from the command bar:
+--     require(game.ReplicatedStorage.kUSI_Terrain)()
+local DATA = [=[__KUSI_DATA__]=]
 
 local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 local function decode(s)
@@ -810,7 +810,7 @@ return function()
 		terrain:WriteVoxels(region, 4, mats, occs)
 		if c % 32 == 0 then task.wait() end
 	end
-	print(("[kSSI] terrain rebuilt: %d chunks"):format(count))
+	print(("[kUSI] terrain rebuilt: %d chunks"):format(count))
 end
 ]==]
 
@@ -881,21 +881,21 @@ end
 		local okT, blob, chunkCount, cells = pcall(captureVoxels, workspace.Terrain)
 		if okT and chunkCount > 0 then
 			-- plain splice (no :format, the rebuild code has % signs of its own)
-			local at = REBUILD_SOURCE:find("__KSSI_DATA__", 1, true)
+			local at = REBUILD_SOURCE:find("__KUSI_DATA__", 1, true)
 			local encoded = base64big(blob)
-			local source = REBUILD_SOURCE:sub(1, at - 1) .. encoded .. REBUILD_SOURCE:sub(at + #"__KSSI_DATA__")
+			local source = REBUILD_SOURCE:sub(1, at - 1) .. encoded .. REBUILD_SOURCE:sub(at + #"__KUSI_DATA__")
 			extraChildren.ReplicatedStorage = extraChildren.ReplicatedStorage or {}
 			local guid = (HttpService:GenerateGUID(false):gsub("-", ""))
 			table.insert(extraChildren.ReplicatedStorage, '<Item class="ModuleScript" referent="RBX' .. guid .. '"><Properties>'
-				.. T("string", "Name", "kSSI_Terrain") .. '<ProtectedString name="Source">' .. cdata(source) .. "</ProtectedString></Properties></Item>")
-			terrainNote = ("terrain backup: %d chunks, %d filled voxels → run require(game.ReplicatedStorage.kSSI_Terrain)() in Studio"):format(chunkCount, cells)
+				.. T("string", "Name", "kUSI_Terrain") .. '<ProtectedString name="Source">' .. cdata(source) .. "</ProtectedString></Properties></Item>")
+			terrainNote = ("terrain backup: %d chunks, %d filled voxels → run require(game.ReplicatedStorage.kUSI_Terrain)() in Studio"):format(chunkCount, cells)
 		elseif not okT then
-			warn("[kSSI] terrain backup failed: " .. tostring(blob))
+			warn("[kUSI] terrain backup failed: " .. tostring(blob))
 		else
-			warn(("[kSSI] terrain backup found no loaded terrain (Y %d to %d)"):format(OPTIONS.TerrainMinY, OPTIONS.TerrainMaxY))
+			warn(("[kUSI] terrain backup found no loaded terrain (Y %d to %d)"):format(OPTIONS.TerrainMinY, OPTIONS.TerrainMaxY))
 		end
 	elseif isPlace and OPTIONS.SaveTerrain and OPTIONS.TerrainBackup == "auto" then
-		print("[kSSI] terrain: the real SmoothGrid was readable, no backup needed")
+		print("[kUSI] terrain: the real SmoothGrid was readable, no backup needed")
 	end
 
 	for _, r in roots do write(r) end
@@ -912,7 +912,7 @@ end
 		local exec = select(1, pcall(identifyexecutor)) and identifyexecutor() or "Unknown"
 		table.insert(out, ('<Item class="Script" referent="RBX%s"><Properties>%s%s%s</Properties></Item>'):format(
 			HttpService:GenerateGUID(false):gsub("-", ""), T("string", "Name", "README"), T("bool", "Disabled", "true"),
-			T("ProtectedString", "Source", cdata(("--[[\n\tSaved with kSSI on %s\n\tPlace %d, %d instances\n\tScripts are decompiled: they may not match the originals.\n]]"):format(tostring(exec), game.PlaceId, count)))))
+			T("ProtectedString", "Source", cdata(("--[[\n\tSaved with kUSI on %s\n\tPlace %d, %d instances\n\tScripts are decompiled: they may not match the originals.\n]]"):format(tostring(exec), game.PlaceId, count)))))
 	end
 	table.insert(out, "</roblox>")
 	local xml = table.concat(out)
@@ -920,8 +920,8 @@ end
 	------------------------------------------------ structure check
 	local opens = select(2, xml:gsub("<Item ", ""))
 	local closes = select(2, xml:gsub("</Item>", ""))
-	assert(opens == closes, ("[kSSI] broken structure: %d <Item> vs %d </Item>"):format(opens, closes))
-	assert(utf8.len(xml) ~= nil, "[kSSI] the file has invalid UTF-8")
+	assert(opens == closes, ("[kUSI] broken structure: %d <Item> vs %d </Item>"):format(opens, closes))
+	assert(utf8.len(xml) ~= nil, "[kUSI] the file has invalid UTF-8")
 
 	------------------------------------------------ output
 	local ext = isPlace and ".rbxlx" or ".rbxmx"
@@ -944,26 +944,26 @@ end
 	local list = {}
 	for k, c in skipped do table.insert(list, ("%s ×%d"):format(k, c)) end
 	table.sort(list)
-	print(("[kSSI] %s: %d instances, %d properties, %d scripts decompiled (%.1f KB) in %.2f s")
+	print(("[kUSI] %s: %d instances, %d properties, %d scripts decompiled (%.1f KB) in %.2f s")
 		:format(savedTo or "returned as text", written, props, decompiled, #xml / 1024, os.clock() - START))
 	if not savedTo then
-		print(("[kSSI] no writefile here: saveinstance returned the file text%s. Paste it into a file named %s and open it in Studio.")
+		print(("[kUSI] no writefile here: saveinstance returned the file text%s. Paste it into a file named %s and open it in Studio.")
 			:format(setclipboard and " and copied it to the clipboard" or "", path))
 	end
-	if terrainNote then print("[kSSI] " .. terrainNote) end
-	if terrainGridIsReal then print("[kSSI] terrain saved from the real SmoothGrid") end
-	if #list > 0 then print("[kSSI] values left out (Studio uses defaults): " .. table.concat(list, ", ")) end
-	for why, n in decompileFails do warn(("[kSSI] decompile failed ×%d: %s"):format(n, why)) end
+	if terrainNote then print("[kUSI] " .. terrainNote) end
+	if terrainGridIsReal then print("[kUSI] terrain saved from the real SmoothGrid") end
+	if #list > 0 then print("[kUSI] values left out (Studio uses defaults): " .. table.concat(list, ", ")) end
+	for why, n in decompileFails do warn(("[kUSI] decompile failed ×%d: %s"):format(n, why)) end
 	if OPTIONS.Debug then
 		local rows = {}
 		for key, e in leftOut do table.insert(rows, ("   %s ×%d (wants %s, got %s)"):format(key, e.n, e.want, e.got)) end
 		table.sort(rows)
-		print("[kSSI] left-out properties:\n" .. table.concat(rows, "\n"))
+		print("[kUSI] left-out properties:\n" .. table.concat(rows, "\n"))
 	end
 	-- written: the path (like before). Not written: the file text itself
 	if savedTo == nil then return xml end
 	return path
 end
 
-genv.saveinstance_kssi = saveinstance
+genv.saveinstance_kusi = saveinstance
 return saveinstance
