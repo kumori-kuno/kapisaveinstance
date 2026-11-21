@@ -1,4 +1,4 @@
-# kSSI — kAPI Syn Save Instance
+# kSSI — kAPI Save Instance
 
 A full **saveinstance** written in plain Luau, using only standard executor globals.
 Save a whole game as a `.rbxlx`, or any instance as a `.rbxmx`, and it opens cleanly in Roblox Studio.
@@ -91,6 +91,10 @@ local config = {
 | `ReadMe` | `true` | Add a disabled **README** script with save info. |
 | `Debug` | `false` | Print every property that couldn't be written, with the type it got. |
 | `YieldEvery` | `400` | Instances per frame (lower = smoother, slower). |
+| `SaveTerrain` | `true` | Save Terrain. |
+| `TerrainBackup` | `"auto"` | `"auto"` adds a rebuild module only when the real terrain data can't be read, `"always"` always adds it, `"never"` never does. |
+| `TerrainRange` | `1024` | How far (studs, around the origin) the backup scans on X/Z. |
+| `TerrainMinY` / `TerrainMaxY` | `-512` / `512` | Height range the backup scans. |
 
 ---
 
@@ -118,6 +122,25 @@ Without `crypt.base64encode`, a built-in Luau base64 is used. If `writefile` is 
 
 ---
 
+## Terrain
+
+kSSI saves terrain two ways:
+
+1. **Real data (like other executors).** If the executor can read Terrain's hidden `SmoothGrid` with `gethiddenproperty`, it's written straight into the file and the terrain loads with the place.
+2. **Backup.** Otherwise kSSI reads the voxels itself with `Terrain:ReadVoxels`, compresses them, and saves them in `ReplicatedStorage.kSSI_Terrain`. Open the place in Studio and run this in the command bar:
+   ```lua
+   require(game.ReplicatedStorage.kSSI_Terrain)()
+   ```
+
+Terrain colors (`MaterialColors`) are always saved. On the client, only terrain that's loaded can be read, so with streaming on, far-away terrain may be missing.
+
+## Not saved (yet)
+
+- A few internal types (`SecurityCapabilities`, `UniqueId`); Studio fills these in itself.
+
+---
+
 ## Credits
+
 - Inspired by [UniversalSynSaveInstance](https://github.com/luau/UniversalSynSaveInstance)
 - API dump from [MaximumADHD/Roblox-Client-Tracker](https://github.com/MaximumADHD/Roblox-Client-Tracker)
