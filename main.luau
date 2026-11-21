@@ -68,6 +68,31 @@ if not base64encode then
 end
 local function base64(s) if s == "" then return "" end return base64encode(s) end
 
+-- own buffer-based base64 for big binary blobs (terrain): doesn't depend on how an
+-- executor's base64encode copes with megabytes of raw bytes
+local B64CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64BYTES = {}
+for i = 1, 64 do B64BYTES[i - 1] = B64CHARS:byte(i) end
+local function base64big(s)
+	local n = #s
+	if n == 0 then return "" end
+	local src = buffer.fromstring(s)
+	local out = buffer.create(((n + 2) // 3) * 4)
+	local o = 0
+	for i = 0, n - 1, 3 do
+		local b1 = buffer.readu8(src, i)
+		local b2 = i + 1 < n and buffer.readu8(src, i + 1) or 0
+		local b3 = i + 2 < n and buffer.readu8(src, i + 2) or 0
+		local v = b1 * 65536 + b2 * 256 + b3
+		buffer.writeu8(out, o, B64BYTES[v // 262144])
+		buffer.writeu8(out, o + 1, B64BYTES[(v // 4096) % 64])
+		buffer.writeu8(out, o + 2, i + 1 < n and B64BYTES[(v // 64) % 64] or 61)
+		buffer.writeu8(out, o + 3, i + 2 < n and B64BYTES[v % 64] or 61)
+		o += 4
+	end
+	return buffer.tostring(out)
+end
+
 local HttpService = game:GetService("HttpService")
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -857,10 +882,12 @@ end
 		if okT and chunkCount > 0 then
 			-- plain splice (no :format, the rebuild code has % signs of its own)
 			local at = REBUILD_SOURCE:find("__KSSI_DATA__", 1, true)
-			local source = REBUILD_SOURCE:sub(1, at - 1) .. base64(blob) .. REBUILD_SOURCE:sub(at + #"__KSSI_DATA__")
+			local encoded = base64big(blob)
+			local source = REBUILD_SOURCE:sub(1, at - 1) .. encoded .. REBUILD_SOURCE:sub(at + #"__KSSI_DATA__")
 			extraChildren.ReplicatedStorage = extraChildren.ReplicatedStorage or {}
-			table.insert(extraChildren.ReplicatedStorage, ('<Item class="ModuleScript" referent="RBX%s"><Properties>%s%s</Properties></Item>'):format(
-				HttpService:GenerateGUID(false):gsub("-", ""), T("string", "Name", "kSSI_Terrain"), T("ProtectedString", "Source", cdata(source))))
+			local guid = (HttpService:GenerateGUID(false):gsub("-", ""))
+			table.insert(extraChildren.ReplicatedStorage, '<Item class="ModuleScript" referent="RBX' .. guid .. '"><Properties>'
+				.. T("string", "Name", "kSSI_Terrain") .. '<ProtectedString name="Source">' .. cdata(source) .. "</ProtectedString></Properties></Item>")
 			terrainNote = ("terrain backup: %d chunks, %d filled voxels → run require(game.ReplicatedStorage.kSSI_Terrain)() in Studio"):format(chunkCount, cells)
 		elseif not okT then
 			warn("[kSSI] terrain backup failed: " .. tostring(blob))
