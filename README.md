@@ -3,7 +3,7 @@
 A full **saveinstance** written in plain Luau, using only standard executor globals.
 Save a whole game as a `.rbxlx`, or any instance as a `.rbxmx`, and it opens cleanly in Roblox Studio.
 
-Made for and tested on **[kAPI](https://github.com/kumori-kuno/kAPI)**. It only needs common executor functions, so it works on other executors too.
+Made for and tested on **[kAPI](https://github.com/kumori-kuno/kAPI)**. It only needs common executor functions, so it works on other executors too, and even without one.
 
 ---
 
@@ -35,6 +35,18 @@ After it loads once, it's also available as the global `saveinstance_kusi`.
 
 ---
 
+## Where it runs
+
+| Where | How it saves |
+|---|---|
+| **kAPI** | Built in: kAPI's own `saveinstance` / `saveplace` run kUSI (latest from GitHub, or the copy inside kAPI when offline). |
+| **Any executor** | The loadstring above. Saves with `writefile`. |
+| **No executor** (plain script, script builder...) | Paste the script in (or put it in a ModuleScript and `require` it). Without `writefile`, `saveinstance` returns the file text instead. |
+
+It needs internet once per session for the Roblox API dump. Downloads try the executor's `request`, then `game:HttpGet`, then `HttpService:GetAsync` (plain server scripts need **Allow HTTP Requests** on).
+
+---
+
 ## What gets saved
 
 | You pass | You get |
@@ -45,6 +57,8 @@ After it loads once, it's also available as the global `saveinstance_kusi`.
 ---
 
 ## Options
+
+kUSI understands **every common executor's option names**: USSI's, Madium's `SaveInstanceOptions`, and the usual aliases (`DecompileScripts`, `SaveNilInstances`, `SavePlayerCharacters`, `IgnoreArchivable`, `FileName`...), in any letter case. Options from other savers that don't apply here (`AntiIdle`, `SafeMode`, `DisableCompression`...) are accepted and ignored, so existing scripts don't break.
 
 ```lua
 local config = {
@@ -63,15 +77,18 @@ local config = {
 	["ExtraInstances"] = {},
 	["FilePath"] = nil,
 	["SaveBytecode"] = false,
+	["SaveNonCreatable"] = false,
+	["CopyToClipboard"] = false,
 	["ShowStatus"] = true,
 	["Callback"] = nil,
 	["ReadMe"] = true,
 	["YieldEvery"] = 400,
 	["SaveTerrain"] = true,
 	["TerrainBackup"] = "auto", -- "auto" | "always" | "never"
-	["TerrainMinY"] = -512,
-	["TerrainMaxY"] = 512,
+	["TerrainMinY"] = -2048,
+	["TerrainMaxY"] = 2048,
 }
+saveinstance(game, config)
 ```
 
 | Option | Default | What it does |
@@ -90,6 +107,8 @@ local config = {
 | `ExtraInstances` | `{}` | More instances to save alongside the main one. |
 | `FilePath` | auto | Output file name. The extension is added if missing. |
 | `SaveBytecode` | `false` | Add each script's bytecode (base64) under its source. |
+| `SaveNonCreatable` | `false` | Also save instances Roblox marks as not creatable. |
+| `CopyToClipboard` | `false` | Copy the file text to the clipboard after saving. |
 | `ShowStatus` | `true` | Show a progress bar at the top of the screen. |
 | `Callback` | `nil` | `function(xml)`: get the file text instead of writing it. |
 | `ReadMe` | `true` | Add a disabled **README** script with save info. |
@@ -106,7 +125,8 @@ local config = {
 - **Two passes.** Every instance gets its referent before anything is written, so `Ref` properties (`PrimaryPart`, `Part0`, ...) never point at something missing from the file.
 - **Right tag for every type.** It reads the live Roblox API dump and writes each property with the tag its type needs: `OptionalCoordinateFrame`, `Color3uint8`, `Content` vs `ContentId`, `token`, `int64`, and so on.
 - **Only loadable properties.** Only properties Roblox can both save and load back get written.
-- **No duplicate content.** When a property has both an old and a new `Content` version (`Image` / `ImageContent`, `SoundId` / `AudioContent`, ...), only one is written.
+- **No duplicate content.** When a property has both an old and a new `Content` version (`Image` / `ImageContent`, `SoundId` / `AudioContent`, `MeshId` / `MeshContent`...), only one is written.
+- **Correct meshes.** `InitialSize` (the mesh's own size) is saved, so MeshParts like R15 limbs keep their shape.
 - **Clean text.** Strings are cleaned to valid UTF-8 without control characters, and scripts go in CDATA.
 - **Attributes and tags** are written in Roblox's binary formats.
 - **Self-check.** The finished file is checked (balanced items, valid UTF-8) before it's saved.
@@ -115,13 +135,11 @@ local config = {
 
 ## What it needs
 
-Every global is looked up once, under any of its common names, with a fallback when it's missing:
-
-Nothing is strictly required. These make it better when they exist:
+Nothing is strictly required. Every global is looked up once, under any of its common names, with a fallback when it's missing. These make it better when they exist:
 
 `writefile`, `decompile`, `gethiddenproperty`, `isscriptable`, `getnilinstances`, `getscriptbytecode`, `crypt.base64encode`, `gethui`, `protectgui`, `setclipboard`, `request`
 
-**No executor? No problem.** Without `writefile` (a plain script, a script builder...), `saveinstance` returns the file text instead of saving it (and copies it if `setclipboard` exists). Paste it into a file named `place.rbxlx` / `model.rbxmx` and open it in Studio:
+**No executor? No problem.** Without `writefile`, `saveinstance` returns the file text instead of saving it (and copies it if `setclipboard` exists). Paste it into a file named `place.rbxlx` / `model.rbxmx` and open it in Studio:
 
 ```lua
 local xml = saveinstance(workspace.MyModel)
@@ -146,6 +164,7 @@ Terrain colors (`MaterialColors`) are always saved. On the client, only terrain 
 ## Not saved (yet)
 
 - A few internal types (`SecurityCapabilities`, `UniqueId`); Studio fills these in itself.
+- Some rare hidden binary data (audio attenuation curves, StyleRule properties, MarkerCurve markers, animation rig data).
 
 ---
 
