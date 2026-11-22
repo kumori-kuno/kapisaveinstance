@@ -694,8 +694,8 @@ local function saveinstance(target, options)
 				return T("BinaryString", name, base64(v))
 			end
 			if vt == "ContentId" then
-				local s = type(v) == "string" and v or ""
-				return T("Content", name, s == "" and "<null></null>" or "<url>" .. esc(s) .. "</url>")
+				if type(v) ~= "string" then return skip(vt) end
+				return T("Content", name, v == "" and "<null></null>" or "<url>" .. esc(v) .. "</url>")
 			end
 			if vt == "Content" then
 				if t == "string" then return T("Content", name, v == "" and "<null></null>" or "<uri>" .. esc(v) .. "</uri>") end
@@ -711,10 +711,7 @@ local function saveinstance(target, options)
 			if vt == "Vector3int16" and t == "Vector3int16" then return T("Vector3int16", name, ("<X>%d</X><Y>%d</Y><Z>%d</Z>"):format(v.X, v.Y, v.Z)) end
 			if vt == "Vector2int16" and t == "Vector2int16" then return T("Vector2int16", name, ("<X>%d</X><Y>%d</Y>"):format(v.X, v.Y)) end
 			if (vt == "CFrame" or vt == "OptionalCoordinateFrame") then
-				if t ~= "CFrame" then
-					if vt == "OptionalCoordinateFrame" then return T("OptionalCoordinateFrame", name, "") end
-					return skip(vt)
-				end
+				if t ~= "CFrame" then return skip(vt) end
 				local c = { v:GetComponents() }
 				for i, x in c do c[i] = num(x) end
 				local body = ("<X>%s</X><Y>%s</Y><Z>%s</Z><R00>%s</R00><R01>%s</R01><R02>%s</R02><R10>%s</R10><R11>%s</R11><R12>%s</R12><R20>%s</R20><R21>%s</R21><R22>%s</R22>"):format(table.unpack(c))
@@ -750,7 +747,7 @@ local function saveinstance(target, options)
 			end
 			if vt == "Axes" and t == "Axes" then return T("Axes", name, "<axes>" .. ((v.X and 1 or 0) + (v.Y and 2 or 0) + (v.Z and 4 or 0)) .. "</axes>") end
 			if vt == "PhysicalProperties" then
-				if t ~= "PhysicalProperties" then return T("PhysicalProperties", name, "<CustomPhysics>false</CustomPhysics>") end
+				if t ~= "PhysicalProperties" then return skip(vt) end
 				local okA, aa = pcall(function() return v.AcousticAbsorption end)
 				return T("PhysicalProperties", name, ("<CustomPhysics>true</CustomPhysics><Density>%s</Density><Friction>%s</Friction><Elasticity>%s</Elasticity><FrictionWeight>%s</FrictionWeight><ElasticityWeight>%s</ElasticityWeight>%s")
 					:format(num(v.Density), num(v.Friction), num(v.Elasticity), num(v.FrictionWeight), num(v.ElasticityWeight),
@@ -773,10 +770,11 @@ local function saveinstance(target, options)
 		"Sandstone", "Mud", "Basalt", "Ground", "CrackedLava", "Asphalt", "Cobblestone", "Ice", "LeafyGrass", "Salt",
 		"Limestone", "Pavement" }
 	local function materialColorsBlob(terrain)
+		-- only from the real colors: if any can't be read, MaterialColors is left out
 		local parts = { string.rep("\0", 6) }
 		for _, name in TERRAIN_MATERIALS do
 			local ok, c = pcall(terrain.GetMaterialColor, terrain, Enum.Material[name])
-			if not ok then c = Color3.new(0.5, 0.5, 0.5) end
+			if not ok or typeof(c) ~= "Color3" then return nil end
 			table.insert(parts, string.char(math.clamp(math.floor(c.R * 255 + 0.5), 0, 255), math.clamp(math.floor(c.G * 255 + 0.5), 0, 255), math.clamp(math.floor(c.B * 255 + 0.5), 0, 255)))
 		end
 		return table.concat(parts)
@@ -1052,7 +1050,7 @@ end
 				if physics then table.insert(out, T("BinaryString", "PhysicsGrid", base64(physics))) end
 			end
 			local colors = readTerrainBlob(obj, "MaterialColors") or materialColorsBlob(obj)
-			table.insert(out, T("BinaryString", "MaterialColors", base64(colors)))
+			if colors then table.insert(out, T("BinaryString", "MaterialColors", base64(colors))) end
 		end
 		for _, p in propsOf(obj.ClassName) do
 			if ignoreProp[p.name] then continue end
