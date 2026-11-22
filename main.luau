@@ -124,9 +124,25 @@ local DEFAULTS = {
 
 --------------------------------------------------------------- API dump (cached between calls)
 local classes
+local propCache = {}
+-- an executor can hand kUSI its own API dump for offline use (kAPI does: __kusi_localdump)
+local localDumpFn = exists("__kusi_localdump", "function")
+local classesLocal
 local function loadDump()
-	if classes then return end
-	local dump = HttpService:JSONDecode(httpget("https://raw.githubusercontent.com/MaximumADHD/Roblox-Client-Tracker/roblox/Full-API-Dump.json"))
+	-- getgenv().KUSI_LOCALDUMP = true: use the executor's own dump even when online (testing)
+	local wantLocal = localDumpFn ~= nil and genv.KUSI_LOCALDUMP == true
+	if classes and classesLocal == wantLocal then return end
+	classes, classesLocal = nil, wantLocal
+	table.clear(propCache)
+	local okH, dump = pcall(function()
+		if wantLocal then error("KUSI_LOCALDUMP is on", 0) end
+		return HttpService:JSONDecode(httpget("https://raw.githubusercontent.com/MaximumADHD/Roblox-Client-Tracker/roblox/Full-API-Dump.json"))
+	end)
+	if not okH then
+		if not localDumpFn then error(dump, 0) end
+		warn("[kUSI] couldn't download the API dump, using the executor's built-in one")
+		dump = localDumpFn()
+	end
 	classes = {}
 	for _, c in dump.Classes do classes[c.Name] = c end
 end
@@ -138,7 +154,6 @@ end
 
 -- properties that load back, with their serialized name (xml names win over script names)
 local SKIP = { Parent = true, Archivable = true, UniqueId = true, HistoryId = true, ScriptGuid = true, Capabilities = true, DefinesCapabilities = true, SourceAssetId = true }
-local propCache = {}
 local function propsOf(className)
 	local cached = propCache[className]
 	if cached then return cached end
