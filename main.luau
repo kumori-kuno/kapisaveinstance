@@ -142,7 +142,7 @@ local propCache = {}
 local function propsOf(className)
 	local cached = propCache[className]
 	if cached then return cached end
-	local list, seen, class = {}, {}, classes[className]
+	local list, seen, class = {}, {}, classes[className] or classes.Instance
 	while class do
 		for _, m in class.Members do
 			if m.MemberType == "Property" and not seen[m.Name] then
@@ -185,7 +185,9 @@ local function propsOf(className)
 end
 local function isCreatable(className)
 	local c = classes[className]
-	return c ~= nil and not tagged(c.Tags, "NotCreatable")
+	-- a class the dump doesn't know (newer than the dump): saved, with the properties it can read
+	if c == nil then return true end
+	return not tagged(c.Tags, "NotCreatable")
 end
 local function isService(className)
 	local c = classes[className]
