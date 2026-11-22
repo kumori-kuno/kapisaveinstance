@@ -473,19 +473,32 @@ local function saveinstance(target, options)
 	if OPTIONS.RemovePlayerCharacters then
 		for _, plr in Players:GetPlayers() do if plr.Character then playerChars[plr.Character] = true end end
 	end
+	local skipReasons = {}
+	local function skipped(reason, className)
+		local key = reason .. " (" .. tostring(className) .. ")"
+		skipReasons[key] = (skipReasons[key] or 0) + 1
+		return false
+	end
 	local function include(obj, isRoot)
-		if ignore[obj] or playerChars[obj] then return false end
+		if ignore[obj] then return skipped("IgnoreList", "?") end
+		if playerChars[obj] then return skipped("player character", "Model") end
 		local okC, className = pcall(function() return obj.ClassName end)
-		if not okC or ignoreClass[className] then return false end
-		if obj:IsA("Players") and not OPTIONS.SavePlayers then return false end
-		if obj:IsA("Terrain") then return OPTIONS.SaveTerrain == true end
+		if not okC then return skipped("ClassName unreadable", "?") end
+		if ignoreClass[className] then return skipped("IgnoreList", className) end
+		if obj:IsA("Players") and not OPTIONS.SavePlayers then return skipped("Players not saved", className) end
+		if obj:IsA("Terrain") then
+			if OPTIONS.SaveTerrain == true then return true end
+			return skipped("SaveTerrain off", className)
+		end
 		if not isRoot then
 			if obj:IsA("Camera") and obj == workspace.CurrentCamera then return true end
-			if not OPTIONS.SaveNonCreatable and not isCreatable(className) and not obj:IsA("LuaSourceContainer") then return false end
+			if not OPTIONS.SaveNonCreatable and not isCreatable(className) and not obj:IsA("LuaSourceContainer") then
+				return skipped(classes[className] and "not creatable" or "not in the API dump", className)
+			end
 		end
 		if OPTIONS.IgnoreNotArchivable then
 			local okA, arch = pcall(function() return obj.Archivable end)
-			if okA and arch == false then return false end
+			if okA and arch == false then return skipped("Archivable = false", className) end
 		end
 		return true
 	end
@@ -1052,6 +1065,12 @@ end
 	if terrainGridIsReal then print("[kUSI] terrain saved from the real SmoothGrid") end
 	if #list > 0 then print("[kUSI] values left out (Studio uses defaults): " .. table.concat(list, ", ")) end
 	for why, n in decompileFails do warn(("[kUSI] decompile failed ×%d: %s"):format(n, why)) end
+	if OPTIONS.Debug then
+		local rows = {}
+		for why, n in skipReasons do table.insert(rows, ("   %s ×%d"):format(why, n)) end
+		table.sort(rows)
+		print("[kUSI] skipped instances (and everything inside them):\n" .. (#rows > 0 and table.concat(rows, "\n") or "   none"))
+	end
 	if OPTIONS.Debug then
 		local rows = {}
 		for key, e in leftOut do table.insert(rows, ("   %s ×%d (wants %s, got %s)"):format(key, e.n, e.want, e.got)) end
