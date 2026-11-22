@@ -277,6 +277,113 @@ local function attrValue(v)
 	end
 	return nil
 end
+
+---------------------------------------------------------------- hidden binary properties
+-- Properties Roblox only stores as binary blobs. They can't be read directly, so each one is
+-- rebuilt from the methods that expose the same data (formats as in USSI's NotScriptable fixes).
+local function attrsBlob(map)
+	-- same layout as AttributesSerialize: count, then (name, type id, value) sorted by name
+	local keys = {}
+	for k in map do table.insert(keys, k) end
+	table.sort(keys)
+	local parts, count = {}, 0
+	for _, k in keys do
+		local enc = attrValue(map[k])
+		if enc then
+			count += 1
+			table.insert(parts, packStr(k) .. enc)
+		end
+	end
+	return string.pack("<I4", count) .. table.concat(parts)
+end
+local function attenuationBlob(curve)
+	-- version byte 0, then (distance/angle f32, volume f32) pairs, sorted
+	if type(curve) ~= "table" or next(curve) == nil then return "\0" end
+	local keys = {}
+	for k in curve do table.insert(keys, k) end
+	table.sort(keys)
+	local parts = { "\0" }
+	for _, k in keys do table.insert(parts, string.pack("<ff", k, curve[k])) end
+	return table.concat(parts)
+end
+local function udim2Bytes(u) return string.pack("<fi4fi4", u.X.Scale, u.X.Offset, u.Y.Scale, u.Y.Offset) end
+
+local HIDDEN_BINARY = {
+	AudioEmitter = {
+		AngleAttenuation = function(o) return attenuationBlob(o:GetAngleAttenuation()) end,
+		DistanceAttenuation = function(o) return attenuationBlob(o:GetDistanceAttenuation()) end,
+	},
+	AudioListener = {
+		AngleAttenuation = function(o) return attenuationBlob(o:GetAngleAttenuation()) end,
+		DistanceAttenuation = function(o) return attenuationBlob(o:GetDistanceAttenuation()) end,
+	},
+	StyleRule = {
+		PropertiesSerialize = function(o)
+			local props = o:GetProperties()
+			if next(props) == nil then return "\0\0\0\0" end
+			return attrsBlob(props)
+		end,
+	},
+	StyleQuery = {
+		ConditionsSerialize = function(o)
+			local conds = o:GetConditions()
+			if next(conds) == nil then return "\0\0\0\0" end
+			return attrsBlob(conds)
+		end,
+	},
+	MarkerCurve = {
+		ValuesAndTimes = function(o)
+			local markers = o:GetMarkers()
+			if #markers == 0 then return "\2\0\0\0\0\0\0\0\1\0\0\0\0\0\0\0" end
+			local values = { string.pack("<I4I4", 2, #markers) }
+			for _, m in markers do table.insert(values, m.Value .. "\0") end
+			local times = { string.pack("<I4I4", 1, #markers) }
+			for _, m in markers do table.insert(times, string.pack("<I4", math.round(m.Time * 2400))) end
+			return table.concat(values) .. table.concat(times)
+		end,
+	},
+	Path2D = {
+		PropertiesSerialize = function(o)
+			local points = o:GetControlPoints()
+			if #points == 0 then return "\0\0\0\0" end
+			local parts = { string.pack("<I4", #points) }
+			for _, pt in points do
+				table.insert(parts, "\35" .. udim2Bytes(pt.Position) .. udim2Bytes(pt.LeftTangent) .. udim2Bytes(pt.RightTangent))
+			end
+			return table.concat(parts)
+		end,
+	},
+	AnimationNodeDefinition = {
+		InputPinData = function(o)
+			local pins = o:GetInputPins()
+			local parts = { string.pack("<I4I4", 1, #pins) }
+			for _, pin in pins do table.insert(parts, packStr(pin)) end
+			return table.concat(parts)
+		end,
+	},
+	PlayerEmulatorService = {
+		SerializedEmulatedPolicyInfo = function(o)
+			local info = o:GetEmulatedPolicyInfo()
+			if next(info) == nil then return "" end
+			return attrsBlob(info)
+		end,
+	},
+}
+-- the blob for obj.prop, walking up the class chain (nil = not one of these)
+local function hiddenBinary(obj, className, prop)
+	local class = classes[className]
+	while class do
+		local fixes = HIDDEN_BINARY[class.Name]
+		if fixes and fixes[prop] then
+			local ok, blob = pcall(fixes[prop], obj)
+			if ok and type(blob) == "string" then return blob end
+			return nil
+		end
+		class = classes[class.Superclass]
+	end
+	return nil
+end
+
 local function attributesBlob(obj)
 	local ok, attrs = pcall(obj.GetAttributes, obj)
 	if not ok or next(attrs) == nil then return nil end
@@ -953,6 +1060,10 @@ end
 			if scriptsOnly and not isScript and p.name ~= "Name" then continue end
 			local ok, v
 			if p.name == "Source" and isScript then ok, v = true, scriptSource(obj)
+			elseif p.vt == "BinaryString" then
+				-- binary-only data: rebuilt from its methods when we know how, else read as usual
+				local blob = hiddenBinary(obj, obj.ClassName, p.name)
+				if blob then ok, v = true, blob else ok, v = read(obj, p) end
 			else ok, v = read(obj, p) end
 			if ok then
 				local okE, enc = pcall(encode, p, v)
