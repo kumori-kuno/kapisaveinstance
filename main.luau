@@ -389,6 +389,15 @@ local function saveinstance(target, options)
 		options, target = target, obj or game
 	end
 	local OPTIONS = normalizeOptions(options)
+	-- game / workspace / Players come from the target itself, so everything kUSI touches is
+	-- the same kind of object (an executor's wrapped instances never mix with raw ones)
+	local game = game
+	pcall(function()
+		if target:IsA("DataModel") then game = target
+		else game = target:FindFirstAncestorWhichIsA("DataModel") or game end
+	end)
+	local workspace = game:GetService("Workspace")
+	local Players = game:GetService("Players")
 	if typeof(target) ~= "Instance" and type(target) ~= "userdata" then error("[kUSI] expected an Instance to save", 2) end
 
 	local status, done = makeStatus(OPTIONS.ShowStatus)
