@@ -39,6 +39,7 @@ After it loads once, it's also available as the global `saveinstance_kusi`.
 
 | Where | How it saves |
 |---|---|
+| **kAPI** | Built in: kAPI's own `saveinstance` / `saveplace` run kUSI (latest from GitHub, or the copy inside kAPI when offline). |
 | **Any executor** | The loadstring above. Saves with `writefile`. |
 | **No executor** (plain script, script builder...) | Paste the script in (or put it in a ModuleScript and `require` it). Without `writefile`, `saveinstance` returns the file text instead. |
 
@@ -128,6 +129,7 @@ saveinstance(game, config)
 - **Correct meshes.** `InitialSize` (the mesh's own size) is saved, so MeshParts like R15 limbs keep their shape.
 - **Clean text.** Strings are cleaned to valid UTF-8 without control characters, and scripts go in CDATA.
 - **Attributes and tags** are written in Roblox's binary formats.
+- **Hidden binary data rebuilt.** Properties Roblox only stores as binary (audio attenuation curves, StyleRule / StyleQuery properties, MarkerCurve markers, Path2D points, animation input pins, emulated policy info) are rebuilt from the methods that expose the same data.
 - **Self-check.** The finished file is checked (balanced items, valid UTF-8) before it's saved.
 
 ---
@@ -163,7 +165,7 @@ Terrain colors (`MaterialColors`) are always saved. On the client, only terrain 
 ## Not saved (yet)
 
 - A few internal types (`SecurityCapabilities`, `UniqueId`); Studio fills these in itself.
-- Some rare hidden binary data (audio attenuation curves, StyleRule properties, MarkerCurve markers, animation rig data).
+- Animation rig data (`AnimationRigData`), and a few other hidden blobs Roblox gives no way to read.
 
 ---
 
