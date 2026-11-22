@@ -125,8 +125,11 @@ local DEFAULTS = {
 --------------------------------------------------------------- API dump (cached between calls)
 local classes
 local propCache = {}
+local allCache = {}
 -- an executor can hand kUSI its own API dump for offline use (kAPI does: __kusi_localdump)
 local localDumpFn = exists("__kusi_localdump", "function")
+-- every hidden property on an instance, set ones included (for ones the dump list doesn't have)
+local gethiddenproperties = exists({ "gethiddenproperties", "get_hidden_properties" }, "function")
 local classesLocal
 local function loadDump()
 	-- getgenv().KUSI_LOCALDUMP = true: use the executor's own dump even when online (testing)
@@ -134,6 +137,7 @@ local function loadDump()
 	if classes and classesLocal == wantLocal then return end
 	classes, classesLocal = nil, wantLocal
 	table.clear(propCache)
+	table.clear(allCache)
 	local okH, dump = pcall(function()
 		if wantLocal then error("KUSI_LOCALDUMP is on", 0) end
 		return HttpService:JSONDecode(httpget("https://raw.githubusercontent.com/MaximumADHD/Roblox-Client-Tracker/roblox/Full-API-Dump.json"))
@@ -197,6 +201,24 @@ local function propsOf(className)
 	list = final
 	propCache[className] = list
 	return list
+end
+local function allMembersOf(className)
+	local cached = allCache[className]
+	if cached then return cached end
+	local out, class = {}, classes[className]
+	while class do
+		for _, m in class.Members do
+			if m.MemberType == "Property" and out[m.Name] == nil then
+				local ser = m.Serialization or {}
+				if ser.CanLoad and ser.CanSave then
+					out[m.Name] = { name = m.Name, vt = m.ValueType.Name, cat = m.ValueType.Category }
+				end
+			end
+		end
+		class = classes[class.Superclass]
+	end
+	allCache[className] = out
+	return out
 end
 local function isCreatable(className)
 	local c = classes[className]
@@ -522,6 +544,12 @@ local function saveinstance(target, options)
 
 	------------------------------------------------ reading
 	local function read(obj, p)
+		-- gethiddenproperty first for every property: it gives the real value, or the one set
+		-- through the executor when the engine couldn't take it
+		if gethiddenproperty then
+			local ok, v = pcall(gethiddenproperty, obj, p.name)
+			if ok and v ~= nil then return true, v end
+		end
 		if not p.hidden then
 			local ok, v = pcall(function() return obj[p.name] end)
 			if ok then return true, v end
@@ -531,10 +559,6 @@ local function saveinstance(target, options)
 				local okV, v = pcall(function() return obj[p.name] end)
 				if okV then return true, v end
 			end
-		end
-		if gethiddenproperty then
-			local ok, v = pcall(gethiddenproperty, obj, p.name)
-			if ok and v ~= nil then return true, v end
 		end
 		-- InitialSize (the mesh's own size) is also readable as MeshSize
 		if p.name == "InitialSize" then
@@ -1052,8 +1076,10 @@ end
 			local colors = readTerrainBlob(obj, "MaterialColors") or materialColorsBlob(obj)
 			if colors then table.insert(out, T("BinaryString", "MaterialColors", base64(colors))) end
 		end
+		local writtenNames = {}
 		for _, p in propsOf(obj.ClassName) do
 			if ignoreProp[p.name] then continue end
+			writtenNames[p.name] = true
 			if isTerrain and (p.name == "SmoothGrid" or p.name == "PhysicsGrid" or p.name == "MaterialColors") then continue end
 			if scriptsOnly and not isScript and p.name ~= "Name" then continue end
 			local ok, v
@@ -1072,6 +1098,20 @@ end
 					local e = leftOut[key]
 					if not e then e = { n = 0, want = p.vt, got = typeof(v) } leftOut[key] = e end
 					e.n += 1
+				end
+			end
+		end
+		-- hidden properties the executor knows that this class's dump list doesn't have
+		if gethiddenproperties then
+			local okH, extra = pcall(gethiddenproperties, obj)
+			if okH and type(extra) == "table" then
+				local all = allMembersOf(obj.ClassName)
+				for name, value in extra do
+					local m = all[name]
+					if m and not writtenNames[name] and not ignoreProp[name] then
+						local okE, enc = pcall(encode, m, value)
+						if okE and enc then table.insert(out, enc) props += 1 end
+					end
 				end
 			end
 		end
