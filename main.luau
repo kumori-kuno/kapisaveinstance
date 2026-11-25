@@ -34,6 +34,10 @@ local function exists(names, kind, fallback)
 end
 
 local identifyexecutor  = exists({ "identifyexecutor", "getexecutorname", "whatexecutor" }, "function", function() return "Unknown", "" end)
+local IS_KAPI = (function()
+	local ok, name = pcall(identifyexecutor)
+	return ok and type(name) == "string" and name:lower():find("kapi", 1, true) ~= nil
+end)()
 local gethiddenproperty = exists({ "gethiddenproperty", "get_hidden_property" }, "function")
 local isscriptable      = exists("isscriptable", "function")
 local decompile         = exists({ "decompile", "Decompile" }, "function")
@@ -544,16 +548,24 @@ local function saveinstance(target, options)
 
 	------------------------------------------------ reading
 	local function read(obj, p)
-		-- gethiddenproperty first for every property: it gives the real value, or the one set
-		-- through the executor when the engine couldn't take it
+		-- normal properties: read straight from the instance first. Some executors' gethiddenproperty
+		-- hands back a wrong/default value for scriptable props (CFrame → identity), which stacked
+		-- every part at the origin. gethiddenproperty is only the first pick for hidden props.
+		-- (kAPI's gethiddenproperty is accurate and also holds values set through the executor,
+		-- so on kAPI it stays the first pick for everything)
+		if not p.hidden and not IS_KAPI then
+			local ok, v = pcall(function() return obj[p.name] end)
+			if ok and v ~= nil then return true, v end
+		end
 		if gethiddenproperty then
 			local ok, v = pcall(gethiddenproperty, obj, p.name)
 			if ok and v ~= nil then return true, v end
 		end
-		if not p.hidden then
+		if IS_KAPI and not p.hidden then
 			local ok, v = pcall(function() return obj[p.name] end)
-			if ok then return true, v end
-		elseif isscriptable then
+			if ok and v ~= nil then return true, v end
+		end
+		if p.hidden and isscriptable then
 			local ok, s = pcall(isscriptable, obj, p.name)
 			if ok and s then
 				local okV, v = pcall(function() return obj[p.name] end)
