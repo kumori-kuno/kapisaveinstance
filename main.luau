@@ -1,5 +1,5 @@
 --[[
-	kUSI (kAPI Universal Save Instance) — kAPI's take on UniversalSynSaveInstance, built only on executor globals.
+	kUSI (kAPI Universal Save Instance) — kAPI's take on UniversalSynSaveInstance.
 ]]
 
 --------------------------------------------------------------- globals → locals
