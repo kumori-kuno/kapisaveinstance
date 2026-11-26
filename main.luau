@@ -1,16 +1,5 @@
 --[[
 	kUSI (kAPI Universal Save Instance) — kAPI's take on UniversalSynSaveInstance, built only on executor globals.
-
-	local saveinstance = loadstring(readfile("kUSI.lua"))()  -- or paste and call directly
-	saveinstance(game)                       → place file (.rbxlx) of game's children
-	saveinstance(workspace.Model)            → model file (.rbxmx) of that instance
-	saveinstance(game, { noscripts = true }) → with options
-	saveinstance({ Object = part, ... })     → USSI's table style also works
-
-	Options (USSI names): mode ("optimized" | "full" | "scripts"), noscripts, Decompile,
-	DecompileIgnore, IgnoreList, IgnoreProperties, IgnoreNotArchivable, NilInstances,
-	RemovePlayerCharacters, SavePlayers, IsolateLocalPlayer, ExtraInstances, FilePath,
-	SaveBytecode, ShowStatus, Callback, ReadMe
 ]]
 
 --------------------------------------------------------------- globals → locals
