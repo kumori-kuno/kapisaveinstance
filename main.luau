@@ -67,7 +67,58 @@ local function httpget(url)
 	error("[kUSI] couldn't download " .. url .. " (" .. table.concat(errors, " / ") .. ")", 0)
 end
 
--- no writefile (plain script, script builder...): the file text is handed back instead
+-- POST with whatever can send it: executor request → HttpService:RequestAsync (server scripts)
+local function httppost(url, body, headers)
+	if requestFn then
+		local ok, r = pcall(requestFn, { Url = url, Method = "POST", Headers = headers, Body = body })
+		if ok and type(r) == "table" and type(r.Body) == "string" then return r.StatusCode == nil or r.StatusCode < 400, r.Body end
+	end
+	local ok, r = pcall(function()
+		return game:GetService("HttpService"):RequestAsync({ Url = url, Method = "POST", Headers = headers, Body = body })
+	end)
+	if ok and type(r) == "table" then return r.Success, r.Body end
+	return false, tostring(r)
+end
+
+-- no writefile: the file goes to a file host instead, and saveinstance returns the download link.
+-- Tried in order, first one that answers wins (some keep files for good, some for a few hours/days).
+local UPLOAD_HOSTS = {
+	{ name = "catbox", url = "https://catbox.moe/user/api.php", field = "fileToUpload", extra = { reqtype = "fileupload" }, kind = "plain", keeps = "permanent" },
+	{ name = "pomf2.lain.la", url = "https://pomf2.lain.la/upload.php", field = "files[]", kind = "pomf", keeps = "permanent" },
+	{ name = "u.pone.rs", url = "https://u.pone.rs/upload.php", field = "files[]", kind = "pomf", keeps = "permanent" },
+	{ name = "litterbox", url = "https://litterbox.catbox.moe/resources/internals/api.php", field = "fileToUpload", extra = { reqtype = "fileupload", time = "72h" }, kind = "plain", keeps = "72 hours" },
+	{ name = "uguu.se", url = "https://uguu.se/upload", field = "files[]", kind = "pomf", keeps = "3 hours" },
+}
+local function uploadFile(filename, data)
+	local HttpService = game:GetService("HttpService")
+	local errors = {}
+	for _, host in UPLOAD_HOSTS do
+		local boundary = "kUSI" .. HttpService:GenerateGUID(false):gsub("-", "")
+		local parts = {}
+		for k, v in host.extra or {} do
+			table.insert(parts, "--" .. boundary .. '\r\nContent-Disposition: form-data; name="' .. k .. '"\r\n\r\n' .. v .. "\r\n")
+		end
+		table.insert(parts, "--" .. boundary .. '\r\nContent-Disposition: form-data; name="' .. host.field .. '"; filename="'
+			.. filename:gsub('[%c"\\]', "_") .. '"\r\nContent-Type: application/octet-stream\r\n\r\n' .. data .. "\r\n")
+		table.insert(parts, "--" .. boundary .. "--\r\n")
+		local ok, body = httppost(host.url, table.concat(parts), { ["Content-Type"] = "multipart/form-data; boundary=" .. boundary })
+		local link
+		if ok and type(body) == "string" then
+			if host.kind == "plain" then
+				link = body:match("^%s*(https://%S+)%s*$")
+			else
+				local okJ, json = pcall(HttpService.JSONDecode, HttpService, body)
+				local f = okJ and type(json) == "table" and json.success and type(json.files) == "table" and json.files[1]
+				link = type(f) == "table" and type(f.url) == "string" and f.url:match("^https://%S+$") or nil
+			end
+		end
+		if link then return link, host end
+		table.insert(errors, host.name .. ": " .. tostring(body):sub(1, 80))
+	end
+	return nil, table.concat(errors, " / ")
+end
+
+-- no base64encode: pure-Luau fallback
 if not base64encode then
 	-- pure-Luau fallback
 	local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -1199,6 +1250,7 @@ end
 	local path = OPTIONS.FilePath or (isPlace and ("place_" .. game.PlaceId) or (target.Name:gsub("[^%w%-_ ]", "_")))
 	if not path:match("%.rbx[ml]x$") then path ..= ext end
 	local savedTo = path
+	local link, linkHost
 	if type(OPTIONS.Callback) == "function" then
 		OPTIONS.Callback(xml)
 		savedTo = "callback"
@@ -1206,9 +1258,20 @@ end
 		writefile(path, xml)
 		if OPTIONS.CopyToClipboard and setclipboard then pcall(setclipboard, xml) end
 	else
-		-- nowhere to write: give the text back (and copy it if we can) so it can be pasted into a file
-		savedTo = nil
-		if setclipboard then pcall(setclipboard, xml) end
+		-- nowhere to write: upload it and hand back a download link
+		status("uploading")
+		local hostOrErr
+		link, hostOrErr = uploadFile(path, xml)
+		if link then
+			linkHost = hostOrErr
+			savedTo = link
+			if setclipboard then pcall(setclipboard, link) end
+		else
+			-- every host refused: give the text back (and copy it if we can) like before
+			warn("[kUSI] couldn't upload the file (" .. tostring(hostOrErr) .. ")")
+			savedTo = nil
+			if setclipboard then pcall(setclipboard, xml) end
+		end
 	end
 	status(("done: %d instances, %d scripts decompiled"):format(written, decompiled))
 	done()
@@ -1218,6 +1281,10 @@ end
 	table.sort(list)
 	print(("[kUSI] %s: %d instances, %d properties, %d scripts decompiled (%.1f KB) in %.2f s")
 		:format(savedTo or "returned as text", written, props, decompiled, #xml / 1024, os.clock() - START))
+	if link then
+		print(("[kUSI] no writefile here: uploaded to %s (kept %s)%s → %s")
+			:format(linkHost.name, linkHost.keeps, setclipboard and ", link copied" or "", link))
+	end
 	if not savedTo then
 		print(("[kUSI] no writefile here: saveinstance returned the file text%s. Paste it into a file named %s and open it in Studio.")
 			:format(setclipboard and " and copied it to the clipboard" or "", path))
@@ -1238,7 +1305,8 @@ end
 		table.sort(rows)
 		print("[kUSI] left-out properties:\n" .. table.concat(rows, "\n"))
 	end
-	-- written: the path (like before). Not written: the file text itself
+	-- written: the path (like before). Uploaded: the download link. Neither: the file text itself
+	if link then return link end
 	if savedTo == nil then return xml end
 	return path
 end
