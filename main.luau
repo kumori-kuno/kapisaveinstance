@@ -551,8 +551,15 @@ local function normalizeOptions(options)
 	return OPTIONS
 end
 
-local function saveinstance(target, options)
+local function saveinstance(target, options, extra)
 	local START = os.clock()
+	-- older style (Dex++, Synapse scripts): saveinstance(obj, "file name", options)
+	if type(options) == "string" then
+		local merged = {}
+		if type(extra) == "table" then for k, v in extra do merged[k] = v end end
+		merged.FilePath = options
+		options = merged
+	end
 	-- USSI table style: saveinstance({ Object = x, ... })
 	if type(target) == "table" and options == nil then
 		local obj
